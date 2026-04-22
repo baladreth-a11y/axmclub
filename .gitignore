@@ -1,0 +1,16 @@
+# Runtime data (generated on first request)
+data/
+*.log
+*.log.*
+
+# Server redirect logs used by e2e harness
+server.out.log
+server.err.log
+e2e-results.log
+
+# OS / editor
+Thumbs.db
+.DS_Store
+*.swp
+.vscode/
+.idea/
