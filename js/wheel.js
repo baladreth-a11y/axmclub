@@ -133,7 +133,7 @@ async function spin() {
     toast(msg + streakNote, 'success');
 
     // Tell anyone interested that a spin just happened.
-    document.dispatchEvent(new CustomEvent('aurum:spin-complete', { detail: result }));
+    document.dispatchEvent(new CustomEvent('axm:spin-complete', { detail: result }));
   } catch (err) {
     if (err.status === 429 && err.data && err.data.remainingMs) {
       const mins = Math.ceil(err.data.remainingMs / 60000);

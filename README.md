@@ -1,4 +1,4 @@
-# AurumClub
+# AxMclub.com
 
 A members club website — professional design, daily spin roulette, tiered
 rewards — built with no dependencies. Backend is a single PowerShell script
@@ -69,7 +69,7 @@ header.js      heroStats.js   wheel.js      leaderboard.js   profile.js
 - `store.js` is the single source of truth. Every render module subscribes; no module calls another module's render directly.
 - `api.js` is the only place that knows URLs and `fetch` options.
 - `modal.js` supports registering views by name (`registerView('profile', { onOpen })`) so feature modules self-register.
-- Custom DOM events (`aurum:spin-complete`) decouple cross-module triggers (e.g., leaderboard refreshes itself on spin without the wheel knowing about it).
+- Custom DOM events (`axm:spin-complete`) decouple cross-module triggers (e.g., leaderboard refreshes itself on spin without the wheel knowing about it).
 
 ## Adding a new feature in 3 steps
 

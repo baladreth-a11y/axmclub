@@ -66,7 +66,7 @@ async function redeem(rewardId, reward) {
     store.set(s => ({ ...s, user: res.user }));
     refreshRewards();
     // Let other modules know
-    document.dispatchEvent(new CustomEvent('aurum:redeem-complete', { detail: res }));
+    document.dispatchEvent(new CustomEvent('axm:redeem-complete', { detail: res }));
     toast(res.redemption.message || 'Reward claimed!', 'success');
   } catch (err) {
     if (err.status === 401) {
@@ -94,7 +94,7 @@ export function initRewards() {
   });
 
   // Keep catalog fresh when relevant things happen.
-  document.addEventListener('aurum:spin-complete', refreshRewards);
+  document.addEventListener('axm:spin-complete', refreshRewards);
 
   // If the user changes (login/logout), balance + tierOk/canAfford change.
   let prevUserEmail = undefined;

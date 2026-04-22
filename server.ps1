@@ -1,5 +1,5 @@
 <#
-  AurumClub — PowerShell backend
+  AxMclub.com — PowerShell backend
   Usage:  powershell -NoProfile -ExecutionPolicy Bypass -File .\server.ps1
   Then open http://localhost:5173
 
@@ -488,7 +488,10 @@ function Handle-Api($req, $resp, $path, $method) {
         $u = $db.users[$email]
         $arr += @{ name = $u.name; points = [int]$u.points; tier = (Get-Tier $u.points).name }
       }
-      $top = $arr | Sort-Object -Property points -Descending | Select-Object -First 10
+      # NOTE: Sort-Object -Property on an array of hashtables is unreliable
+      # in PS 5.1 (may silently fall back to input order). A scriptblock key
+      # forces proper numeric comparison.
+      $top = $arr | Sort-Object -Property { [int]$_.points } -Descending | Select-Object -First 10
       Send-Json $resp @{ leaderboard = @($top) }
       return
     }
@@ -548,7 +551,7 @@ catch {
 }
 
 Write-Host ""
-Write-Host "  AurumClub backend running" -ForegroundColor Green
+Write-Host "  AxMclub.com backend running" -ForegroundColor Green
 Write-Host "  -> $prefix" -ForegroundColor Cyan
 Write-Host "  -> DB file: $DbPath" -ForegroundColor DarkGray
 Write-Host "  Press Ctrl+C to stop."

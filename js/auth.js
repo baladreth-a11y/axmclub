@@ -35,7 +35,7 @@ export function initAuth() {
       closeModal(); e.target.reset();
       refreshStats();
       refreshLeaderboard();
-      toast('Welcome to AurumClub!', 'success');
+      toast('Welcome to AxMclub!', 'success');
     } catch (err) { toast(err.message, 'error'); }
   });
 

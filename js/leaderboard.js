@@ -52,7 +52,7 @@ export function initLeaderboard() {
   render(store.get());
   store.subscribe(render);
   // Refresh when a spin completes (fired by wheel.js).
-  document.addEventListener('aurum:spin-complete', refreshLeaderboard);
+  document.addEventListener('axm:spin-complete', refreshLeaderboard);
   // Passive polling in case someone else spun.
   setInterval(refreshLeaderboard, 60_000);
 }

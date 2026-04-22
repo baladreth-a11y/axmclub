@@ -1,4 +1,4 @@
-# AurumClub end-to-end test (PowerShell 5.1 compatible).
+# AxMclub.com end-to-end test (PowerShell 5.1 compatible).
 # Spawns an isolated server on port 5175 with its own data folder,
 # runs the full user flow, writes e2e-results.log, then cleans up.
 
@@ -51,7 +51,7 @@ function StatusCodeOf {
     catch { return 0 }
 }
 
-Log ('AurumClub E2E — ' + (Get-Date -Format o)) 'Yellow'
+Log ('AxMclub.com E2E — ' + (Get-Date -Format o)) 'Yellow'
 Log ('Test dir: ' + $TestDir)
 
 # Copy project into an isolated temp directory so it has a fresh data/ folder.
@@ -195,7 +195,7 @@ try {
     Section '10. Static files are served'
     $html = Invoke-WebRequest -Uri ($Base + '/') -UseBasicParsing
     Check 'GET / returns 200' ($html.StatusCode -eq 200)
-    Check 'GET / contains AurumClub brand' ($html.Content -match 'AurumClub|Aurum')
+    Check 'GET / contains AxMclub brand' ($html.Content -match 'AxMclub')
     Check 'GET / contains #leaderboard section' ($html.Content -match 'id="leaderboard"')
     Check 'GET / contains profile modal view' ($html.Content -match 'data-view="profile"')
 
