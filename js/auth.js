@@ -29,7 +29,8 @@ export function initAuth() {
       const { user } = await api.register({
         name: fd.get('name'),
         email: fd.get('email'),
-        password: fd.get('password')
+        password: fd.get('password'),
+        accountType: fd.get('accountType') || 'supporter'
       });
       store.set({ user });
       closeModal(); e.target.reset();

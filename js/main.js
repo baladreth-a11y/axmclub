@@ -11,11 +11,13 @@ import { initProfile } from './profile.js';
 import { initAuth } from './auth.js';
 import { initTasks, refreshTasks } from './tasks.js';
 import { initCamroom } from './camroom.js';
+import { initGate } from './gate.js';
 
 async function bootstrap() {
   $('#year').textContent = new Date().getFullYear();
 
   initModal();
+  initGate();
   initHeader();
   initHeroStats();
   initWheel();

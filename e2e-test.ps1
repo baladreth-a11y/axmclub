@@ -108,6 +108,24 @@ try {
     $stats1 = Invoke-RestMethod -Uri ($Base + '/api/stats')
     Check 'Stats.members == 1 after register' ($stats1.members -eq 1) ('got ' + $stats1.members)
 
+    Section '3a. Account type on register'
+    $acct = $reg.user.accountType
+    Check 'Registered user accountType is supporter' ($acct -eq 'supporter') ('got ' + $acct)
+
+    $modelCode = 0
+    try {
+        $null = Invoke-RestMethod -Uri ($Base + '/api/register') -Method Post -ContentType 'application/json' -Body (JsonBody @{ name='Model Tester'; email='model@example.com'; password='abcd'; accountType='model' })
+    }
+    catch { $modelCode = StatusCodeOf $_ }
+    Check 'Register with accountType=model returns 403' ($modelCode -eq 403) ('got ' + $modelCode)
+
+    $invalidAcct = 0
+    try {
+        $null = Invoke-RestMethod -Uri ($Base + '/api/register') -Method Post -ContentType 'application/json' -Body (JsonBody @{ name='Bogus'; email='bogus@example.com'; password='abcd'; accountType='admin' })
+    }
+    catch { $invalidAcct = StatusCodeOf $_ }
+    Check 'Register with accountType=admin returns 400' ($invalidAcct -eq 400) ('got ' + $invalidAcct)
+
     Section '3. Duplicate registration rejected'
     $dupCode = 0
     try {
@@ -208,6 +226,9 @@ try {
     $rewardsJs = Invoke-WebRequest -Uri ($Base + '/js/rewards.js') -UseBasicParsing
     Check 'GET /js/rewards.js returns 200' ($rewardsJs.StatusCode -eq 200)
 
+    $gateJs = Invoke-WebRequest -Uri ($Base + '/js/gate.js') -UseBasicParsing
+    Check 'GET /js/gate.js returns 200' ($gateJs.StatusCode -eq 200)
+
     $camJs = Invoke-WebRequest -Uri ($Base + '/js/camroom.js') -UseBasicParsing
     Check 'GET /js/camroom.js returns 200' ($camJs.StatusCode -eq 200)
 
@@ -233,6 +254,12 @@ try {
     Check 'GET / contains #party-roster section'  ($html.Content -match 'id="party-roster"')
     Check 'GET / contains AxMcamPlayers banner'   ($html.Content -match 'AxM.*cam.*Players')
     Check 'GET / has Support & Rewards dropdown'  ($html.Content -match 'nav-dropdown-toggle')
+    Check 'GET / has gate overlay element'        ($html.Content -match 'id="gate"')
+    Check 'GET / has account-type segment'        ($html.Content -match 'class="acct-segment"')
+    Check 'GET / has Fansite link'                ($html.Content -match 'data-kind="fansite"')
+    # Three player cards (count of <article class="player-card">).
+    $playerCardCount = ([regex]::Matches($html.Content, 'class="player-card"')).Count
+    Check 'Players grid has exactly 3 cards' ($playerCardCount -eq 3) ('got ' + $playerCardCount)
 
     Section '11. Rewards catalog'
     $catAnon = Invoke-RestMethod -Uri ($Base + '/api/rewards')

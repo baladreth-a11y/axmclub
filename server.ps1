@@ -175,6 +175,8 @@ function Public-User($u) {
   if ($u.streak) { $streak = [int]$u.streak }
   $camExp = 0
   if ($u.camPassExpires) { $camExp = [long]$u.camPassExpires }
+  $acct = 'supporter'
+  if ($u.accountType) { $acct = [string]$u.accountType }
   return @{
     name           = $u.name
     email          = $u.email
@@ -185,6 +187,7 @@ function Public-User($u) {
     streak         = $streak
     redemptions    = $redCount
     camPassExpires = $camExp
+    accountType    = $acct
   }
 }
 
@@ -257,6 +260,14 @@ function Handle-Api($req, $resp, $path, $method) {
       $name = ("$($body.name)").Trim()
       $email = ("$($body.email)").Trim().ToLower()
       $password = "$($body.password)"
+      $accountType = ("$($body.accountType)").Trim().ToLower()
+      if (-not $accountType) { $accountType = 'supporter' }
+      if ($accountType -eq 'model') {
+        Send-Json $resp @{ error = 'Model accounts are invite-only and coming soon.' } 403; return
+      }
+      if ($accountType -ne 'supporter') {
+        Send-Json $resp @{ error = 'Invalid account type.' } 400; return
+      }
       if (-not $name -or -not $email -or -not $password) {
         Send-Json $resp @{ error = 'Name, email and password are required.' } 400; return
       }
@@ -269,13 +280,14 @@ function Handle-Api($req, $resp, $path, $method) {
       $salt = New-Salt
       $hash = Hash-Password $password $salt
       $db.users[$email] = @{
-        name     = $name
-        email    = $email
-        pwSalt   = $salt
-        pwHash   = $hash
-        points   = 0
-        lastSpin = 0
-        joined   = NowMs
+        name        = $name
+        email       = $email
+        pwSalt      = $salt
+        pwHash      = $hash
+        points      = 0
+        lastSpin    = 0
+        joined      = NowMs
+        accountType = $accountType
       }
       $db.stats.members = [int]$db.stats.members + 1
       $sid = New-Token
