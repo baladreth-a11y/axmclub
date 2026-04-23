@@ -208,6 +208,12 @@ try {
     $rewardsJs = Invoke-WebRequest -Uri ($Base + '/js/rewards.js') -UseBasicParsing
     Check 'GET /js/rewards.js returns 200' ($rewardsJs.StatusCode -eq 200)
 
+    $camJs = Invoke-WebRequest -Uri ($Base + '/js/camroom.js') -UseBasicParsing
+    Check 'GET /js/camroom.js returns 200' ($camJs.StatusCode -eq 200)
+
+    $tasksJs = Invoke-WebRequest -Uri ($Base + '/js/tasks.js') -UseBasicParsing
+    Check 'GET /js/tasks.js returns 200' ($tasksJs.StatusCode -eq 200)
+
     $css = Invoke-WebRequest -Uri ($Base + '/styles.css') -UseBasicParsing
     Check 'GET /styles.css returns 200 and CSS mime' ($css.StatusCode -eq 200 -and $css.Headers['Content-Type'] -match 'css')
 
@@ -221,10 +227,15 @@ try {
     Check 'DB file not servable (403)' ($forbidden -eq 403) ('got ' + $forbidden)
 
     Check 'GET / contains #catalog section' ($html.Content -match 'id="catalog"')
+    Check 'GET / contains #camroom section' ($html.Content -match 'id="camroom"')
+    Check 'GET / contains #tasks section'   ($html.Content -match 'id="tasks"')
 
     Section '11. Rewards catalog'
     $catAnon = Invoke-RestMethod -Uri ($Base + '/api/rewards')
-    Check 'Catalog has 4 rewards' (@($catAnon.rewards).Count -eq 4) ('got ' + @($catAnon.rewards).Count)
+    Check 'Catalog has 5 rewards' (@($catAnon.rewards).Count -eq 5) ('got ' + @($catAnon.rewards).Count)
+    $catIds = ''
+    foreach ($r in @($catAnon.rewards)) { $catIds = $catIds + ',' + $r.id }
+    Check 'Catalog contains cam-pass' ($catIds -match 'cam-pass')
     Check 'Anonymous catalog reports signedIn false' ($catAnon.signedIn -eq $false)
     $ids = ''
     foreach ($r in @($catAnon.rewards)) { $ids = $ids + ',' + $r.id }
@@ -269,6 +280,95 @@ try {
     }
     catch { $ptsCode = StatusCodeOf $_ }
     Check '0-pt user redeeming 250-pt reward returns 402' ($ptsCode -eq 402) ('got ' + $ptsCode)
+
+    Section '14. Cam room pass'
+    $camAnonCode = 0
+    try {
+        $null = Invoke-RestMethod -Uri ($Base + '/api/cam/status')
+    }
+    catch { $camAnonCode = StatusCodeOf $_ }
+    Check 'Anonymous /api/cam/status returns 401' ($camAnonCode -eq 401) ('got ' + $camAnonCode)
+
+    # Register a dedicated cam-test user
+    $camSess = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+    $camBody = JsonBody @{ name='Dana'; email='dana@example.com'; password='abcd' }
+    $null = Invoke-RestMethod -Uri ($Base + '/api/register') -Method Post -ContentType 'application/json' -WebSession $camSess -Body $camBody
+
+    $camStatus0 = Invoke-RestMethod -Uri ($Base + '/api/cam/status') -WebSession $camSess
+    Check 'Fresh user has no active pass' ($camStatus0.active -eq $false)
+
+    $invalidCode = 0
+    try {
+        $null = Invoke-RestMethod -Uri ($Base + '/api/cam/redeem-password') -Method Post -ContentType 'application/json' -WebSession $camSess -Body (JsonBody @{ password='NOPE' })
+    }
+    catch { $invalidCode = StatusCodeOf $_ }
+    Check 'Invalid password returns 404' ($invalidCode -eq 404) ('got ' + $invalidCode)
+
+    $camOk = Invoke-RestMethod -Uri ($Base + '/api/cam/redeem-password') -Method Post -ContentType 'application/json' -WebSession $camSess -Body (JsonBody @{ password='MODEL10' })
+    Check 'MODEL10 grants a pass' ($camOk.ok -eq $true)
+    Check 'Remaining close to 10 minutes' ($camOk.remainingMs -ge 599000 -and $camOk.remainingMs -le 600000) ('got ' + $camOk.remainingMs)
+
+    $camStatus1 = Invoke-RestMethod -Uri ($Base + '/api/cam/status') -WebSession $camSess
+    Check 'Status now reports active pass' ($camStatus1.active -eq $true)
+
+    $dupCode = 0
+    try {
+        $null = Invoke-RestMethod -Uri ($Base + '/api/cam/redeem-password') -Method Post -ContentType 'application/json' -WebSession $camSess -Body (JsonBody @{ password='MODEL10' })
+    }
+    catch { $dupCode = StatusCodeOf $_ }
+    Check 'Same user redeeming MODEL10 twice returns 409' ($dupCode -eq 409) ('got ' + $dupCode)
+
+    $adminCode = 0
+    try {
+        $null = Invoke-RestMethod -Uri ($Base + '/api/cam/create-password') -Method Post -ContentType 'application/json' -Body (JsonBody @{ password='HACK'; uses=99 })
+    }
+    catch { $adminCode = StatusCodeOf $_ }
+    Check 'create-password without admin key returns 403' ($adminCode -eq 403) ('got ' + $adminCode)
+
+    Section '15. Daily tasks'
+    $taskAnon = Invoke-RestMethod -Uri ($Base + '/api/tasks')
+    Check 'Anonymous tasks returns 5 items' (@($taskAnon.tasks).Count -eq 5) ('got ' + @($taskAnon.tasks).Count)
+    Check 'Anonymous tasks signedIn false' ($taskAnon.signedIn -eq $false)
+
+    $taskList = Invoke-RestMethod -Uri ($Base + '/api/tasks') -WebSession $camSess
+    Check 'Signed-in tasks signedIn true' ($taskList.signedIn -eq $true)
+    $firstAvail = @($taskList.tasks | Where-Object { $_.available })
+    Check 'At least one task available' ($firstAvail.Count -ge 1)
+
+    $anonClaim = 0
+    try {
+        $null = Invoke-RestMethod -Uri ($Base + '/api/tasks/claim') -Method Post -ContentType 'application/json' -Body (JsonBody @{ taskId='daily-login' })
+    }
+    catch { $anonClaim = StatusCodeOf $_ }
+    Check 'Anonymous claim returns 401' ($anonClaim -eq 401) ('got ' + $anonClaim)
+
+    $unknownTask = 0
+    try {
+        $null = Invoke-RestMethod -Uri ($Base + '/api/tasks/claim') -Method Post -ContentType 'application/json' -WebSession $camSess -Body (JsonBody @{ taskId='does-not-exist' })
+    }
+    catch { $unknownTask = StatusCodeOf $_ }
+    Check 'Unknown taskId returns 404' ($unknownTask -eq 404) ('got ' + $unknownTask)
+
+    $before = Invoke-RestMethod -Uri ($Base + '/api/me') -WebSession $camSess
+    $claim1 = Invoke-RestMethod -Uri ($Base + '/api/tasks/claim') -Method Post -ContentType 'application/json' -WebSession $camSess -Body (JsonBody @{ taskId='daily-login' })
+    Check 'Claiming daily-login succeeds' ($claim1.ok -eq $true)
+    Check 'Claim awards 15 pts' ($claim1.user.points -eq ([int]$before.user.points + 15)) ('delta=' + ($claim1.user.points - [int]$before.user.points))
+
+    $cooldownCode = 0
+    try {
+        $null = Invoke-RestMethod -Uri ($Base + '/api/tasks/claim') -Method Post -ContentType 'application/json' -WebSession $camSess -Body (JsonBody @{ taskId='daily-login' })
+    }
+    catch { $cooldownCode = StatusCodeOf $_ }
+    Check 'Immediate re-claim returns 429' ($cooldownCode -eq 429) ('got ' + $cooldownCode)
+
+    $profileClaim = Invoke-RestMethod -Uri ($Base + '/api/tasks/claim') -Method Post -ContentType 'application/json' -WebSession $camSess -Body (JsonBody @{ taskId='complete-profile' })
+    Check 'One-time task awards 50 pts' ($profileClaim.reward -eq 50) ('got ' + $profileClaim.reward)
+    $onceCode = 0
+    try {
+        $null = Invoke-RestMethod -Uri ($Base + '/api/tasks/claim') -Method Post -ContentType 'application/json' -WebSession $camSess -Body (JsonBody @{ taskId='complete-profile' })
+    }
+    catch { $onceCode = StatusCodeOf $_ }
+    Check 'One-time task claimed twice returns 409' ($onceCode -eq 409) ('got ' + $onceCode)
 
     Section '13. Streak + spin history'
     $aliceMe = Invoke-RestMethod -Uri ($Base + '/api/me') -WebSession $aliceSession

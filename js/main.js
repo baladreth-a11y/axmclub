@@ -9,6 +9,8 @@ import { initLeaderboard, refreshLeaderboard } from './leaderboard.js';
 import { initRewards, refreshRewards } from './rewards.js';
 import { initProfile } from './profile.js';
 import { initAuth } from './auth.js';
+import { initTasks, refreshTasks } from './tasks.js';
+import { initCamroom } from './camroom.js';
 
 async function bootstrap() {
   $('#year').textContent = new Date().getFullYear();
@@ -19,6 +21,8 @@ async function bootstrap() {
   initWheel();
   initLeaderboard();
   initRewards();
+  initTasks();
+  initCamroom();
   initProfile();
   initAuth();
 
@@ -28,7 +32,7 @@ async function bootstrap() {
     user: meRes.status === 'fulfilled' ? meRes.value.user : null,
     stats: statsRes.status === 'fulfilled' ? statsRes.value : { members: 0, spins: 0 }
   });
-  await Promise.allSettled([refreshLeaderboard(), refreshRewards()]);
+  await Promise.allSettled([refreshLeaderboard(), refreshRewards(), refreshTasks()]);
 }
 
 bootstrap();

@@ -19,10 +19,11 @@
         <span class="brand-name">AxMclub<span class="brand-accent">.com</span></span>
       </a>
       <nav class="nav-links" aria-label="Primary">
-        <a href="#features">Features</a>
+        <a href="#tasks">Tasks</a>
         <a href="#roulette">Roulette</a>
         <a href="#rewards">Rewards</a>
         <a href="#catalog">Catalog</a>
+        <a href="#camroom">Cam Room</a>
         <a href="#leaderboard">Leaderboard</a>
       </nav>
       <div class="nav-actions">
@@ -119,6 +120,20 @@
     </div>
   </section>
 
+  <!-- TASKS -->
+  <section id="tasks" class="section">
+    <div class="container">
+      <div class="section-head">
+        <span class="eyebrow">Earn more</span>
+        <h2>Daily tasks</h2>
+        <p class="muted">Click to claim. Some are one-time, others reset daily or weekly.</p>
+      </div>
+      <div id="tasksGrid" class="tasks-grid">
+        <p class="lb-empty">Loading…</p>
+      </div>
+    </div>
+  </section>
+
   <!-- ROULETTE -->
   <section id="roulette" class="section section-alt">
     <div class="container roulette-wrap">
@@ -195,6 +210,51 @@
       </div>
       <div id="catalogGrid" class="catalog-grid">
         <p class="lb-empty">Loading…</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- CAM ROOM -->
+  <section id="camroom" class="section section-alt">
+    <div class="container">
+      <div class="section-head">
+        <span class="eyebrow">Members only</span>
+        <h2>Cam room</h2>
+        <p class="muted" id="camHint">Enter a model-issued code, redeem 1,500 pts in the catalog, or earn enough points from daily tasks.</p>
+      </div>
+
+      <div class="cam-card">
+        <!-- Locked view -->
+        <div id="camLocked" class="cam-state">
+          <div class="cam-stage cam-stage-locked" aria-hidden="true">
+            <div class="cam-stage-overlay">
+              <span class="cam-lock-icon">▶</span>
+              <p class="cam-stage-title">Stream locked</p>
+              <p class="cam-stage-sub">Unlock a 10-minute pass to enter.</p>
+            </div>
+          </div>
+          <form id="camPasswordForm" class="cam-password-form">
+            <label class="sr-only" for="camPasswordInput">Password</label>
+            <input id="camPasswordInput" type="text" placeholder="Enter pass code (e.g. MODEL10)" autocomplete="off" spellcheck="false" />
+            <button type="submit" class="btn btn-primary">Enter code</button>
+          </form>
+          <p class="fine-print">Tip: stack Gold-tier bonuses and daily tasks to afford the 1,500-pt pass.</p>
+        </div>
+
+        <!-- Live view -->
+        <div id="camLive" class="cam-state hidden">
+          <div class="cam-stage cam-stage-live" aria-hidden="true">
+            <div class="cam-live-indicator"><span class="pulse"></span>LIVE</div>
+            <div class="cam-stage-overlay">
+              <p class="cam-stage-title">Stream placeholder</p>
+              <p class="cam-stage-sub">Your pass is active. Hook this up to your WebRTC/HLS provider.</p>
+            </div>
+          </div>
+          <div class="cam-live-footer">
+            <span class="cam-countdown-label">Time left</span>
+            <span id="camCountdown" class="cam-countdown">10:00</span>
+          </div>
+        </div>
       </div>
     </div>
   </section>

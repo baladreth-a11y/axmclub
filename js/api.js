@@ -31,5 +31,11 @@ export const api = {
   rewards:      () => request('/api/rewards'),
   redeem:       rewardId => request('/api/redeem', { method: 'POST', body: { rewardId } }),
   redemptions:  () => request('/api/redemptions'),
-  history:      () => request('/api/history')
+  history:      () => request('/api/history'),
+
+  camStatus:         () => request('/api/cam/status'),
+  camRedeemPassword: password => request('/api/cam/redeem-password', { method: 'POST', body: { password } }),
+
+  tasks:             () => request('/api/tasks'),
+  claimTask:         taskId => request('/api/tasks/claim', { method: 'POST', body: { taskId } })
 };

@@ -102,10 +102,28 @@ $Script:Segments = @(
   @{ label='75 pts';  points=75  },
   @{ label='5 pts';   points=5   }
 )
-$Script:CooldownMs      = 24 * 60 * 60 * 1000  # 24h
-$Script:StreakWindowMs  = 48 * 60 * 60 * 1000  # 48h grace to keep streak alive
-$Script:StreakBonusEvery = 7
-$Script:StreakBonusPts   = 100
+$Script:CooldownMs        = 24 * 60 * 60 * 1000  # 24h
+$Script:StreakWindowMs    = 48 * 60 * 60 * 1000  # 48h grace to keep streak alive
+$Script:StreakBonusEvery  = 7
+$Script:StreakBonusPts    = 100
+$Script:CamPassDurationMs = 10 * 60 * 1000       # 10 min
+
+# Cam-room passwords (issued by the model / admin).
+# `usesByUser` tracks per-user one-shot redemptions to prevent spam.
+$Script:CamPasswords = @{
+  'MODEL10'    = @{ uses = 5;   note = 'Model of the day';     usesByUser = @{} }
+  'VIP-FAST'   = @{ uses = 10;  note = 'VIP holders';           usesByUser = @{} }
+  'OPEN-HOUSE' = @{ uses = 999; note = 'Open house — everyone'; usesByUser = @{} }
+}
+
+# Click-to-claim tasks. cooldownMs = 0 means one-time only.
+$Script:Tasks = @(
+  @{ id='daily-login';      title='Daily check-in';       reward=15; cooldownMs=86400000;   description='Show up every day for a small boost.' }
+  @{ id='share-club';       title='Share AxMclub';         reward=30; cooldownMs=86400000;   description='Paste our promo link somewhere public.' }
+  @{ id='visit-partner';    title='Visit a partner offer'; reward=25; cooldownMs=86400000;   description='Take a quick look at a partner page.' }
+  @{ id='complete-profile'; title='Complete your profile'; reward=50; cooldownMs=0;          description='One-time bonus for filling in your info.' }
+  @{ id='refer-friend';     title='Refer a friend';        reward=75; cooldownMs=604800000;  description='Share your referral link with a friend (weekly).' }
+)
 
 # Redeemable rewards catalog
 $Script:Catalog = @(
@@ -129,6 +147,11 @@ $Script:Catalog = @(
     effect='symbolic'
     description='Book a 30-minute 1:1 concierge session.'
   }
+  @{
+    id='cam-pass'; title='10-minute cam pass'; cost=1500; minTier='Gold'
+    effect='cam-pass'
+    description='Unlock the cam room for 10 minutes immediately.'
+  }
 )
 
 $Script:TierRanks = @{ Silver = 0; Gold = 1; Platinum = 2 }
@@ -150,15 +173,18 @@ function Public-User($u) {
   if ($u.redemptions) { $redCount = @($u.redemptions).Count }
   $streak = 0
   if ($u.streak) { $streak = [int]$u.streak }
+  $camExp = 0
+  if ($u.camPassExpires) { $camExp = [long]$u.camPassExpires }
   return @{
-    name        = $u.name
-    email       = $u.email
-    points      = [int]$u.points
-    lastSpin    = [long]$u.lastSpin
-    joined      = [long]$u.joined
-    tier        = (Get-Tier $u.points).name
-    streak      = $streak
-    redemptions = $redCount
+    name           = $u.name
+    email          = $u.email
+    points         = [int]$u.points
+    lastSpin       = [long]$u.lastSpin
+    joined         = [long]$u.joined
+    tier           = (Get-Tier $u.points).name
+    streak         = $streak
+    redemptions    = $redCount
+    camPassExpires = $camExp
   }
 }
 
@@ -437,6 +463,10 @@ function Handle-Api($req, $resp, $path, $method) {
           $u.points = [int]$u.points + $extraBonus
           $effectMessage = ('You uncovered ' + $extraBonus + ' bonus pts.')
         }
+        'cam-pass' {
+          $u.camPassExpires = (NowMs) + $Script:CamPassDurationMs
+          $effectMessage = 'Cam room unlocked for 10 minutes. Enjoy!'
+        }
         default {
           $effectMessage = 'Claim recorded. Our team will be in touch.'
         }
@@ -479,6 +509,150 @@ function Handle-Api($req, $resp, $path, $method) {
       $h = $s.user.history
       if (-not $h) { $h = @() }
       Send-Json $resp @{ history = @($h) }
+      return
+    }
+
+    'GET /api/cam/status' {
+      $s = Get-SessionUser $req $db
+      if (-not $s) { Send-Json $resp @{ error = 'Sign in required.' } 401; return }
+      $u = $s.user
+      $now = NowMs
+      $exp = [long]0
+      if ($u.camPassExpires) { $exp = [long]$u.camPassExpires }
+      # Force the Int64 overload of Math.Max (unix ms always overflows Int32).
+      $remaining = [math]::Max([long]0, [long]($exp - $now))
+      Send-Json $resp @{
+        active      = ($remaining -gt 0)
+        expiresAt   = $exp
+        remainingMs = $remaining
+      }
+      return
+    }
+
+    'POST /api/cam/redeem-password' {
+      $s = Get-SessionUser $req $db
+      if (-not $s) { Send-Json $resp @{ error = 'Sign in required.' } 401; return }
+      $u = $s.user
+      $body = Read-JsonBody $req
+      $pw = ("$($body.password)").Trim().ToUpper()
+      if (-not $pw) {
+        Send-Json $resp @{ error = 'Password is required.' } 400; return
+      }
+      if (-not $Script:CamPasswords.ContainsKey($pw)) {
+        Send-Json $resp @{ error = 'Invalid password.' } 404; return
+      }
+      $entry = $Script:CamPasswords[$pw]
+      if (-not $entry.usesByUser) { $entry.usesByUser = @{} }
+      if ($entry.usesByUser.ContainsKey($u.email)) {
+        Send-Json $resp @{ error = 'You already redeemed this password.' } 409; return
+      }
+      if ([int]$entry.uses -le 0) {
+        Send-Json $resp @{ error = 'Password has been used up.' } 410; return
+      }
+      $entry.uses = [int]$entry.uses - 1
+      $entry.usesByUser[$u.email] = (NowMs)
+      $u.camPassExpires = (NowMs) + $Script:CamPassDurationMs
+      Save-Db $db
+      Send-Json $resp @{
+        ok             = $true
+        note           = $entry.note
+        camPassExpires = [long]$u.camPassExpires
+        remainingMs    = $Script:CamPassDurationMs
+        user           = (Public-User $u)
+      }
+      return
+    }
+
+    'POST /api/cam/create-password' {
+      $adminKey = $env:AURUM_ADMIN_KEY
+      $given = $req.Headers['x-admin-key']
+      if (-not $adminKey -or $given -ne $adminKey) {
+        Send-Json $resp @{ error = 'Admin only.' } 403; return
+      }
+      $body = Read-JsonBody $req
+      $pw = ("$($body.password)").Trim().ToUpper()
+      $uses = 1
+      if ($body.uses) { $uses = [int]$body.uses }
+      if (-not $pw) { Send-Json $resp @{ error = 'password is required.' } 400; return }
+      $Script:CamPasswords[$pw] = @{ uses = $uses; note = 'Admin-issued'; usesByUser = @{} }
+      Send-Json $resp @{ ok = $true; password = $pw; uses = $uses }
+      return
+    }
+
+    'GET /api/tasks' {
+      $s = Get-SessionUser $req $db
+      $u = $null
+      if ($s) { $u = $s.user }
+      $claims = @{}
+      if ($u -and $u.taskClaims) { $claims = $u.taskClaims }
+      $now = NowMs
+      $list = @()
+      foreach ($t in $Script:Tasks) {
+        $claimedAt = 0
+        if ($claims.ContainsKey($t.id)) { $claimedAt = [long]$claims[$t.id] }
+        $available = $true
+        $cooldownRemaining = 0
+        if ($claimedAt -gt 0) {
+          if ([long]$t.cooldownMs -eq 0) {
+            $available = $false
+          }
+          else {
+            $elapsed = $now - $claimedAt
+            if ($elapsed -lt [long]$t.cooldownMs) {
+              $available = $false
+              $cooldownRemaining = [long]$t.cooldownMs - $elapsed
+            }
+          }
+        }
+        $list += @{
+          id                = $t.id
+          title             = $t.title
+          description       = $t.description
+          reward            = [int]$t.reward
+          cooldownMs        = [long]$t.cooldownMs
+          claimedAt         = $claimedAt
+          available         = ([bool]$u -and $available)
+          cooldownRemaining = $cooldownRemaining
+        }
+      }
+      Send-Json $resp @{ tasks = @($list); signedIn = [bool]$u }
+      return
+    }
+
+    'POST /api/tasks/claim' {
+      $s = Get-SessionUser $req $db
+      if (-not $s) { Send-Json $resp @{ error = 'Sign in required.' } 401; return }
+      $u = $s.user
+      $body = Read-JsonBody $req
+      $id = ("$($body.taskId)").Trim()
+      if (-not $id) { Send-Json $resp @{ error = 'taskId is required.' } 400; return }
+      $task = $null
+      foreach ($t in $Script:Tasks) { if ($t.id -eq $id) { $task = $t; break } }
+      if (-not $task) { Send-Json $resp @{ error = 'Task not found.' } 404; return }
+
+      if (-not $u.taskClaims) { $u.taskClaims = @{} }
+      $now = NowMs
+      if ($u.taskClaims.ContainsKey($task.id)) {
+        $prev = [long]$u.taskClaims[$task.id]
+        if ([long]$task.cooldownMs -eq 0) {
+          Send-Json $resp @{ error = 'One-time task already claimed.' } 409; return
+        }
+        $elapsed = $now - $prev
+        if ($elapsed -lt [long]$task.cooldownMs) {
+          Send-Json $resp @{ error = 'Task on cooldown.'; remainingMs = ([long]$task.cooldownMs - $elapsed) } 429; return
+        }
+      }
+      $u.taskClaims[$task.id] = $now
+      $u.points = [int]$u.points + [int]$task.reward
+      Save-Db $db
+      Send-Json $resp @{
+        ok       = $true
+        taskId   = $task.id
+        title    = $task.title
+        reward   = [int]$task.reward
+        claimedAt = $now
+        user     = (Public-User $u)
+      }
       return
     }
 

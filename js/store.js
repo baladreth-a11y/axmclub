@@ -16,5 +16,8 @@ export function createStore(initial) {
 export const store = createStore({
   user: null,
   stats: { members: 0, spins: 0 },
-  leaderboard: []
+  leaderboard: [],
+  rewards: [],
+  tasks: [],
+  cam: { active: false, expiresAt: 0, remainingMs: 0 }
 });
