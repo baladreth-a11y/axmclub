@@ -34,6 +34,10 @@
     --gold-ring:    rgba(212, 175, 106, 0.28);
     --accent:       #7c6cff;
     --accent-soft:  rgba(124, 108, 255, 0.14);
+    /* Dedicated token currency color (teal) — keeps Tokens visually distinct
+       from the purple Platinum accent and from gold Points. */
+    --token:        #5ac4c4;
+    --token-soft:   rgba(90, 196, 196, 0.14);
     --success:      #5ac47d;
     --danger:       #ef5a5a;
     --on-gold:      #1a1408;
@@ -532,7 +536,7 @@
     font-variant-numeric: tabular-nums;
   }
   .stat-row dd.is-points { color: var(--gold); }
-  .stat-row dd.is-tokens { color: var(--accent); }
+  .stat-row dd.is-tokens { color: var(--token); }
   .stats-widget-actions {
     display: flex; gap: var(--space-2); flex-wrap: wrap;
   }
@@ -557,16 +561,17 @@
   }
   .token-pack strong {
     font-family: 'Playfair Display', Georgia, serif;
-    font-size: 22px; color: var(--gold);
+    font-size: 22px; color: var(--token);
   }
   .token-pack small {
     font-size: 12px; color: var(--muted);
     letter-spacing: 0.08em;
   }
+  .token-pack:hover { border-color: var(--token); }
   .token-pack:has(input:checked) {
-    border-color: var(--gold);
-    background: var(--gold-soft);
-    box-shadow: 0 0 0 3px var(--gold-ring);
+    border-color: var(--token);
+    background: var(--token-soft);
+    box-shadow: 0 0 0 3px rgba(90, 196, 196, 0.28);
   }
 
   /* Offer textarea inherits .form input styling but needs resize/rows */

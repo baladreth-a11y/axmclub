@@ -256,11 +256,40 @@ function Session-Cookie($sid) {
   return "sid=$sid; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000"
 }
 
-# ---------- API ----------
-function Handle-Api($req, $resp, $path, $method) {
-  $db = Load-Db
-  $key = "$method $path"
+# ==========================================================================
+#  API
+#  ----
+#  The public API is split by domain into a small set of sub-handlers. Each
+#  sub-handler returns $true when it has handled the request (regardless of
+#  whether the response was a success or a structured error), and $false
+#  when the route belongs to a different domain.
+#
+#  Handle-Api is the top-level dispatcher that walks the sub-handlers in
+#  order and sends a 404 if none of them claim the route.
+#
+#  Adding a new endpoint:
+#    1. Pick the domain it belongs to (or add a new Handle-X function).
+#    2. Add a new case to that handler's switch statement.
+#    3. Use `Require-Auth` to cut the 3-line 401 guard when the endpoint
+#       needs a signed-in user.
+# ==========================================================================
 
+# Returns the logged-in user on success. On failure writes a 401 and
+# returns $null. Inside a handler:
+#   $u = Require-Auth $req $resp $db
+#   if (-not $u) { return $true }   # the 401 has already been sent
+function Require-Auth($req, $resp, $db) {
+  $s = Get-SessionUser $req $db
+  if (-not $s) {
+    Send-Json $resp @{ error = 'Sign in required.' } 401
+    return $null
+  }
+  return $s.user
+}
+
+# ---- Auth: register / login / logout / me -------------------------------
+function Handle-Auth($req, $resp, $db, $path, $method) {
+  $key = "$method $path"
   switch ($key) {
 
     'POST /api/register' {
@@ -271,19 +300,24 @@ function Handle-Api($req, $resp, $path, $method) {
       $accountType = ("$($body.accountType)").Trim().ToLower()
       if (-not $accountType) { $accountType = 'supporter' }
       if ($accountType -eq 'model') {
-        Send-Json $resp @{ error = 'Model accounts are invite-only and coming soon.' } 403; return
+        Send-Json $resp @{ error = 'Model accounts are invite-only and coming soon.' } 403
+        return $true
       }
       if ($accountType -ne 'supporter') {
-        Send-Json $resp @{ error = 'Invalid account type.' } 400; return
+        Send-Json $resp @{ error = 'Invalid account type.' } 400
+        return $true
       }
       if (-not $name -or -not $email -or -not $password) {
-        Send-Json $resp @{ error = 'Name, email and password are required.' } 400; return
+        Send-Json $resp @{ error = 'Name, email and password are required.' } 400
+        return $true
       }
       if ($password.Length -lt 4) {
-        Send-Json $resp @{ error = 'Password must be at least 4 characters.' } 400; return
+        Send-Json $resp @{ error = 'Password must be at least 4 characters.' } 400
+        return $true
       }
       if ($db.users.ContainsKey($email)) {
-        Send-Json $resp @{ error = 'An account with this email already exists.' } 409; return
+        Send-Json $resp @{ error = 'An account with this email already exists.' } 409
+        return $true
       }
       $salt = New-Salt
       $hash = Hash-Password $password $salt
@@ -305,7 +339,7 @@ function Handle-Api($req, $resp, $path, $method) {
       $db.sessions[$sid] = $email
       Save-Db $db
       Send-Json $resp @{ user = (Public-User $db.users[$email]) } 200 @((Session-Cookie $sid))
-      return
+      return $true
     }
 
     'POST /api/login' {
@@ -313,17 +347,19 @@ function Handle-Api($req, $resp, $path, $method) {
       $email = ("$($body.email)").Trim().ToLower()
       $password = "$($body.password)"
       if (-not $db.users.ContainsKey($email)) {
-        Send-Json $resp @{ error = 'Invalid email or password.' } 401; return
+        Send-Json $resp @{ error = 'Invalid email or password.' } 401
+        return $true
       }
       $u = $db.users[$email]
       if ((Hash-Password $password $u.pwSalt) -ne $u.pwHash) {
-        Send-Json $resp @{ error = 'Invalid email or password.' } 401; return
+        Send-Json $resp @{ error = 'Invalid email or password.' } 401
+        return $true
       }
       $sid = New-Token
       $db.sessions[$sid] = $email
       Save-Db $db
       Send-Json $resp @{ user = (Public-User $u) } 200 @((Session-Cookie $sid))
-      return
+      return $true
     }
 
     'POST /api/logout' {
@@ -331,30 +367,41 @@ function Handle-Api($req, $resp, $path, $method) {
       if ($s) { $db.sessions.Remove($s.sid); Save-Db $db }
       $expired = 'sid=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0'
       Send-Json $resp @{ ok = $true } 200 @($expired)
-      return
+      return $true
     }
 
     'GET /api/me' {
       $s = Get-SessionUser $req $db
-      if (-not $s) { Send-Json $resp @{ user = $null }; return }
+      if (-not $s) { Send-Json $resp @{ user = $null }; return $true }
       Send-Json $resp @{ user = (Public-User $s.user) }
-      return
+      return $true
     }
+  }
+  return $false
+}
 
-    'GET /api/stats' {
-      Send-Json $resp @{ members = [int]$db.stats.members; spins = [int]$db.stats.spins }
-      return
-    }
+# ---- Stats --------------------------------------------------------------
+function Handle-Stats($req, $resp, $db, $path, $method) {
+  if ("$method $path" -eq 'GET /api/stats') {
+    Send-Json $resp @{ members = [int]$db.stats.members; spins = [int]$db.stats.spins }
+    return $true
+  }
+  return $false
+}
+
+# ---- Roulette: spin + history ------------------------------------------
+function Handle-Roulette($req, $resp, $db, $path, $method) {
+  $key = "$method $path"
+  switch ($key) {
 
     'POST /api/spin' {
-      $s = Get-SessionUser $req $db
-      if (-not $s) { Send-Json $resp @{ error = 'Sign in required.' } 401; return }
-      $u = $s.user
+      $u = Require-Auth $req $resp $db
+      if (-not $u) { return $true }
       $now = NowMs
       $elapsed = $now - [long]$u.lastSpin
       if ([long]$u.lastSpin -gt 0 -and $elapsed -lt $Script:CooldownMs) {
         Send-Json $resp @{ error = 'Spin on cooldown.'; remainingMs = ($Script:CooldownMs - $elapsed) } 429
-        return
+        return $true
       }
 
       # Streak: continuing if last spin was within the streak window; otherwise reset.
@@ -411,8 +458,25 @@ function Handle-Api($req, $resp, $path, $method) {
         tier        = $tier.name
         user        = (Public-User $u)
       }
-      return
+      return $true
     }
+
+    'GET /api/history' {
+      $s = Get-SessionUser $req $db
+      if (-not $s) { Send-Json $resp @{ history = @() }; return $true }
+      $h = $s.user.history
+      if (-not $h) { $h = @() }
+      Send-Json $resp @{ history = @($h) }
+      return $true
+    }
+  }
+  return $false
+}
+
+# ---- Rewards: list / redeem / redemptions ------------------------------
+function Handle-Rewards($req, $resp, $db, $path, $method) {
+  $key = "$method $path"
+  switch ($key) {
 
     'GET /api/rewards' {
       $s = Get-SessionUser $req $db
@@ -447,29 +511,32 @@ function Handle-Api($req, $resp, $path, $method) {
         userTier   = $userTier
         signedIn   = [bool]$u
       }
-      return
+      return $true
     }
 
     'POST /api/redeem' {
-      $s = Get-SessionUser $req $db
-      if (-not $s) { Send-Json $resp @{ error = 'Sign in required.' } 401; return }
-      $u = $s.user
+      $u = Require-Auth $req $resp $db
+      if (-not $u) { return $true }
       $body = Read-JsonBody $req
       $rewardId = ("$($body.rewardId)").Trim()
       if (-not $rewardId) {
-        Send-Json $resp @{ error = 'rewardId is required.' } 400; return
+        Send-Json $resp @{ error = 'rewardId is required.' } 400
+        return $true
       }
       $reward = $null
       foreach ($r in $Script:Catalog) { if ($r.id -eq $rewardId) { $reward = $r; break } }
       if (-not $reward) {
-        Send-Json $resp @{ error = 'Reward not found.' } 404; return
+        Send-Json $resp @{ error = 'Reward not found.' } 404
+        return $true
       }
       $userTier = (Get-Tier $u.points).name
       if ((Get-TierRank $userTier) -lt (Get-TierRank $reward.minTier)) {
-        Send-Json $resp @{ error = ('Requires ' + $reward.minTier + ' tier.') } 403; return
+        Send-Json $resp @{ error = ('Requires ' + $reward.minTier + ' tier.') } 403
+        return $true
       }
       if ([int]$u.points -lt [int]$reward.cost) {
-        Send-Json $resp @{ error = 'Not enough points.' } 402; return
+        Send-Json $resp @{ error = 'Not enough points.' } 402
+        return $true
       }
 
       $u.points = [int]$u.points - [int]$reward.cost
@@ -514,38 +581,37 @@ function Handle-Api($req, $resp, $path, $method) {
         redemption = $redemption
         user       = (Public-User $u)
       }
-      return
+      return $true
     }
 
     'GET /api/redemptions' {
       $s = Get-SessionUser $req $db
-      if (-not $s) { Send-Json $resp @{ redemptions = @() }; return }
+      if (-not $s) { Send-Json $resp @{ redemptions = @() }; return $true }
       $r = $s.user.redemptions
       if (-not $r) { $r = @() }
       Send-Json $resp @{ redemptions = @($r) }
-      return
+      return $true
     }
+  }
+  return $false
+}
 
-    'GET /api/history' {
-      $s = Get-SessionUser $req $db
-      if (-not $s) { Send-Json $resp @{ history = @() }; return }
-      $h = $s.user.history
-      if (-not $h) { $h = @() }
-      Send-Json $resp @{ history = @($h) }
-      return
-    }
+# ---- Economy: tokens/buy + offer ---------------------------------------
+function Handle-Economy($req, $resp, $db, $path, $method) {
+  $key = "$method $path"
+  switch ($key) {
 
     'POST /api/tokens/buy' {
-      $s = Get-SessionUser $req $db
-      if (-not $s) { Send-Json $resp @{ error = 'Sign in required.' } 401; return }
-      $u = $s.user
+      $u = Require-Auth $req $resp $db
+      if (-not $u) { return $true }
       $body = Read-JsonBody $req
       $amount = 0
       if ($body.amount) { $amount = [int]$body.amount }
       # Accept a small set of preset packs only (demo mode — no real payment).
       $allowed = @(100, 500, 1200, 3000)
       if ($allowed -notcontains $amount) {
-        Send-Json $resp @{ error = 'Invalid pack size.' } 400; return
+        Send-Json $resp @{ error = 'Invalid pack size.' } 400
+        return $true
       }
       if (-not $u.tokens) { $u.tokens = 0 }
       $u.tokens = [int]$u.tokens + $amount
@@ -555,18 +621,18 @@ function Handle-Api($req, $resp, $path, $method) {
         bought = $amount
         user   = (Public-User $u)
       }
-      return
+      return $true
     }
 
     'POST /api/offer' {
-      $s = Get-SessionUser $req $db
-      if (-not $s) { Send-Json $resp @{ error = 'Sign in required.' } 401; return }
-      $u = $s.user
+      $u = Require-Auth $req $resp $db
+      if (-not $u) { return $true }
       $body = Read-JsonBody $req
       $target  = ("$($body.target)").Trim()
       $message = ("$($body.message)").Trim()
       if (-not $message -or $message.Length -lt 10) {
-        Send-Json $resp @{ error = 'Offer must be at least 10 characters.' } 400; return
+        Send-Json $resp @{ error = 'Offer must be at least 10 characters.' } 400
+        return $true
       }
       if (-not $u.offers) { $u.offers = @() }
       $offer = @{
@@ -580,13 +646,20 @@ function Handle-Api($req, $resp, $path, $method) {
       if ($u.offers.Count -gt 20) { $u.offers = @($u.offers[-20..-1]) }
       Save-Db $db
       Send-Json $resp @{ ok = $true; offer = $offer }
-      return
+      return $true
     }
+  }
+  return $false
+}
+
+# ---- Cam room: status / redeem-password / create-password --------------
+function Handle-Cam($req, $resp, $db, $path, $method) {
+  $key = "$method $path"
+  switch ($key) {
 
     'GET /api/cam/status' {
-      $s = Get-SessionUser $req $db
-      if (-not $s) { Send-Json $resp @{ error = 'Sign in required.' } 401; return }
-      $u = $s.user
+      $u = Require-Auth $req $resp $db
+      if (-not $u) { return $true }
       $now = NowMs
       $exp = [long]0
       if ($u.camPassExpires) { $exp = [long]$u.camPassExpires }
@@ -597,28 +670,31 @@ function Handle-Api($req, $resp, $path, $method) {
         expiresAt   = $exp
         remainingMs = $remaining
       }
-      return
+      return $true
     }
 
     'POST /api/cam/redeem-password' {
-      $s = Get-SessionUser $req $db
-      if (-not $s) { Send-Json $resp @{ error = 'Sign in required.' } 401; return }
-      $u = $s.user
+      $u = Require-Auth $req $resp $db
+      if (-not $u) { return $true }
       $body = Read-JsonBody $req
       $pw = ("$($body.password)").Trim().ToUpper()
       if (-not $pw) {
-        Send-Json $resp @{ error = 'Password is required.' } 400; return
+        Send-Json $resp @{ error = 'Password is required.' } 400
+        return $true
       }
       if (-not $Script:CamPasswords.ContainsKey($pw)) {
-        Send-Json $resp @{ error = 'Invalid password.' } 404; return
+        Send-Json $resp @{ error = 'Invalid password.' } 404
+        return $true
       }
       $entry = $Script:CamPasswords[$pw]
       if (-not $entry.usesByUser) { $entry.usesByUser = @{} }
       if ($entry.usesByUser.ContainsKey($u.email)) {
-        Send-Json $resp @{ error = 'You already redeemed this password.' } 409; return
+        Send-Json $resp @{ error = 'You already redeemed this password.' } 409
+        return $true
       }
       if ([int]$entry.uses -le 0) {
-        Send-Json $resp @{ error = 'Password has been used up.' } 410; return
+        Send-Json $resp @{ error = 'Password has been used up.' } 410
+        return $true
       }
       $entry.uses = [int]$entry.uses - 1
       $entry.usesByUser[$u.email] = (NowMs)
@@ -631,24 +707,36 @@ function Handle-Api($req, $resp, $path, $method) {
         remainingMs    = $Script:CamPassDurationMs
         user           = (Public-User $u)
       }
-      return
+      return $true
     }
 
     'POST /api/cam/create-password' {
       $adminKey = $env:AURUM_ADMIN_KEY
       $given = $req.Headers['x-admin-key']
       if (-not $adminKey -or $given -ne $adminKey) {
-        Send-Json $resp @{ error = 'Admin only.' } 403; return
+        Send-Json $resp @{ error = 'Admin only.' } 403
+        return $true
       }
       $body = Read-JsonBody $req
       $pw = ("$($body.password)").Trim().ToUpper()
       $uses = 1
       if ($body.uses) { $uses = [int]$body.uses }
-      if (-not $pw) { Send-Json $resp @{ error = 'password is required.' } 400; return }
+      if (-not $pw) {
+        Send-Json $resp @{ error = 'password is required.' } 400
+        return $true
+      }
       $Script:CamPasswords[$pw] = @{ uses = $uses; note = 'Admin-issued'; usesByUser = @{} }
       Send-Json $resp @{ ok = $true; password = $pw; uses = $uses }
-      return
+      return $true
     }
+  }
+  return $false
+}
+
+# ---- Tasks: list / claim -----------------------------------------------
+function Handle-Tasks($req, $resp, $db, $path, $method) {
+  $key = "$method $path"
+  switch ($key) {
 
     'GET /api/tasks' {
       $s = Get-SessionUser $req $db
@@ -687,30 +775,36 @@ function Handle-Api($req, $resp, $path, $method) {
         }
       }
       Send-Json $resp @{ tasks = @($list); signedIn = [bool]$u }
-      return
+      return $true
     }
 
     'POST /api/tasks/claim' {
-      $s = Get-SessionUser $req $db
-      if (-not $s) { Send-Json $resp @{ error = 'Sign in required.' } 401; return }
-      $u = $s.user
+      $u = Require-Auth $req $resp $db
+      if (-not $u) { return $true }
       $body = Read-JsonBody $req
       $id = ("$($body.taskId)").Trim()
-      if (-not $id) { Send-Json $resp @{ error = 'taskId is required.' } 400; return }
+      if (-not $id) {
+        Send-Json $resp @{ error = 'taskId is required.' } 400
+        return $true
+      }
       $task = $null
       foreach ($t in $Script:Tasks) { if ($t.id -eq $id) { $task = $t; break } }
-      if (-not $task) { Send-Json $resp @{ error = 'Task not found.' } 404; return }
-
+      if (-not $task) {
+        Send-Json $resp @{ error = 'Task not found.' } 404
+        return $true
+      }
       if (-not $u.taskClaims) { $u.taskClaims = @{} }
       $now = NowMs
       if ($u.taskClaims.ContainsKey($task.id)) {
         $prev = [long]$u.taskClaims[$task.id]
         if ([long]$task.cooldownMs -eq 0) {
-          Send-Json $resp @{ error = 'One-time task already claimed.' } 409; return
+          Send-Json $resp @{ error = 'One-time task already claimed.' } 409
+          return $true
         }
         $elapsed = $now - $prev
         if ($elapsed -lt [long]$task.cooldownMs) {
-          Send-Json $resp @{ error = 'Task on cooldown.'; remainingMs = ([long]$task.cooldownMs - $elapsed) } 429; return
+          Send-Json $resp @{ error = 'Task on cooldown.'; remainingMs = ([long]$task.cooldownMs - $elapsed) } 429
+          return $true
         }
       }
       $u.taskClaims[$task.id] = $now
@@ -724,27 +818,42 @@ function Handle-Api($req, $resp, $path, $method) {
         claimedAt = $now
         user     = (Public-User $u)
       }
-      return
-    }
-
-    'GET /api/leaderboard' {
-      $arr = @()
-      foreach ($email in $db.users.Keys) {
-        $u = $db.users[$email]
-        $arr += @{ name = $u.name; points = [int]$u.points; tier = (Get-Tier $u.points).name }
-      }
-      # NOTE: Sort-Object -Property on an array of hashtables is unreliable
-      # in PS 5.1 (may silently fall back to input order). A scriptblock key
-      # forces proper numeric comparison.
-      $top = $arr | Sort-Object -Property { [int]$_.points } -Descending | Select-Object -First 10
-      Send-Json $resp @{ leaderboard = @($top) }
-      return
-    }
-
-    default {
-      Send-Json $resp @{ error = 'Not found.' } 404
+      return $true
     }
   }
+  return $false
+}
+
+# ---- Community: leaderboard --------------------------------------------
+function Handle-Community($req, $resp, $db, $path, $method) {
+  if ("$method $path" -eq 'GET /api/leaderboard') {
+    $arr = @()
+    foreach ($email in $db.users.Keys) {
+      $u = $db.users[$email]
+      $arr += @{ name = $u.name; points = [int]$u.points; tier = (Get-Tier $u.points).name }
+    }
+    # NOTE: Sort-Object -Property on an array of hashtables is unreliable
+    # in PS 5.1 (may silently fall back to input order). A scriptblock key
+    # forces proper numeric comparison.
+    $top = $arr | Sort-Object -Property { [int]$_.points } -Descending | Select-Object -First 10
+    Send-Json $resp @{ leaderboard = @($top) }
+    return $true
+  }
+  return $false
+}
+
+# ---- Top-level dispatcher ----------------------------------------------
+function Handle-Api($req, $resp, $path, $method) {
+  $db = Load-Db
+  if (Handle-Auth      $req $resp $db $path $method) { return }
+  if (Handle-Stats     $req $resp $db $path $method) { return }
+  if (Handle-Roulette  $req $resp $db $path $method) { return }
+  if (Handle-Rewards   $req $resp $db $path $method) { return }
+  if (Handle-Economy   $req $resp $db $path $method) { return }
+  if (Handle-Cam       $req $resp $db $path $method) { return }
+  if (Handle-Tasks     $req $resp $db $path $method) { return }
+  if (Handle-Community $req $resp $db $path $method) { return }
+  Send-Json $resp @{ error = 'Not found.' } 404
 }
 
 # ---------- Dispatcher ----------
