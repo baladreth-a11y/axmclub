@@ -264,7 +264,9 @@ try {
     Check 'GET / has Fansite link'                ($html.Content -match 'data-kind="fansite"')
     # Three player cards (count of <article class="player-card">).
     $playerCardCount = ([regex]::Matches($html.Content, 'class="player-card"')).Count
-    Check 'Players grid has exactly 3 cards' ($playerCardCount -eq 3) ('got ' + $playerCardCount)
+    Check 'Players grid has exactly 6 cards' ($playerCardCount -eq 6) ('got ' + $playerCardCount)
+    $affiliateCount = ([regex]::Matches($html.Content, 'data-affiliate="crakrevenue"')).Count
+    Check 'Three affiliate performers each expose webcam + fansite (6 affiliate links)' ($affiliateCount -eq 6) ('got ' + $affiliateCount)
     Check 'GET / has #top-strip section'          ($html.Content -match 'id="top-strip"')
     Check 'GET / has stats widget'                ($html.Content -match 'class="stats-widget"')
     Check 'GET / has Rank stat'                   ($html.Content -match 'id="widgetRank"')
