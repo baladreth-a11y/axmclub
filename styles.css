@@ -1286,16 +1286,24 @@
     pointer-events: none;
     opacity: 0.55;
   }
+  /* Base gate overlay. No backdrop-filter by default so that after the
+     user confirms their age, the page behind the (still-visible) auth
+     card reads clearly. */
   .gate {
     position: fixed; inset: 0;
     z-index: 70;
     display: grid; place-items: center;
     padding: var(--space-5);
+    background: rgba(6, 8, 13, 0.45);
+    animation: fade 240ms ease-out;
+    transition: background var(--medium), backdrop-filter var(--medium);
+  }
+  /* During age verification, darken + softly blur whatever shows through. */
+  body.is-age-gated .gate {
     background:
       radial-gradient(1000px 500px at 50% 20%, rgba(212,175,106,0.12), transparent 60%),
       rgba(6, 8, 13, 0.62);
     backdrop-filter: blur(2px);
-    animation: fade 240ms ease-out;
   }
   .gate-card {
     width: min(520px, 100%);
