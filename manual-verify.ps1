@@ -29,11 +29,16 @@ try {
   Write-Host ""
   Write-Host "== 1. Anonymous HTML gate state ==" -ForegroundColor Cyan
   $html = Invoke-WebRequest -Uri ($Base + '/') -UseBasicParsing
-  Ok 'GET / returns 200'                       ($html.StatusCode -eq 200)
-  Ok 'Body has is-gated class'                 ($html.Content -match 'body class="is-gated"')
-  Ok 'Gate overlay is visible (no hidden)'     ($html.Content -match 'id="gate" class="gate"[^h]')
-  Ok 'Register form has acct-segment'          ($html.Content -match 'class="acct-segment"')
-  Ok 'Gate CTA says Create Supporter account'  ($html.Content -match 'Create Supporter account')
+  Ok 'GET / returns 200'                            ($html.StatusCode -eq 200)
+  Ok 'Body has is-gated class'                      ($html.Content -match 'body class="[^"]*\bis-gated\b')
+  Ok 'Body also starts with is-age-gated (blur)'    ($html.Content -match 'body class="[^"]*\bis-age-gated\b')
+  Ok 'Gate overlay is visible (no hidden)'          ($html.Content -match 'id="gate" class="gate"[^h]')
+  Ok 'Age stage is shown first (not hidden)'        ($html.Content -match 'class="gate-card" data-stage="age"')
+  Ok 'Auth stage is hidden initially'               ($html.Content -match 'class="gate-card hidden" data-stage="auth"')
+  Ok 'Age gate asks 18+ question'                   ($html.Content -match 'Are you 18 or older')
+  Ok 'Age gate has 18+ confirm button'              ($html.Content -match 'id="gateAgeYes"')
+  Ok 'Register form has acct-segment'               ($html.Content -match 'class="acct-segment"')
+  Ok 'Auth stage CTA is Create Supporter account'   ($html.Content -match 'Create Supporter account')
 
   Write-Host ""
   Write-Host "== 2. Anonymous /api/me is null ==" -ForegroundColor Cyan

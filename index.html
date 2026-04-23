@@ -10,7 +10,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
 </head>
-<body class="is-gated">
+<body class="is-gated is-age-gated">
   <!-- NAVBAR -->
   <header class="navbar">
     <div class="container nav-inner">
@@ -48,14 +48,32 @@
     </div>
   </header>
 
-  <!-- GATE OVERLAY (shown when signed out; blurs the rest of the page) -->
+  <!-- GATE OVERLAY: two stages (age verification -> auth). -->
   <div id="gate" class="gate" role="dialog" aria-modal="true" aria-labelledby="gateTitle">
-    <div class="gate-card">
-      <span class="eyebrow">Members only</span>
-      <h2 id="gateTitle">Join the club to unlock the site</h2>
+
+    <!-- Stage A: 18+ age verification (blur stays until confirmed) -->
+    <div class="gate-card" data-stage="age">
+      <span class="eyebrow">Age verification</span>
+      <h2 id="gateTitle">Are you 18 or older?</h2>
       <p class="muted">
-        AxMclub.com is a private members space. Create a free Supporter account
-        or sign in to continue.
+        AxMclub.com hosts members-only adult content. By continuing you
+        confirm you are at least 18 years old and consent to viewing this
+        material.
+      </p>
+      <div class="gate-actions">
+        <button id="gateAgeYes" class="btn btn-primary btn-lg">Yes, I'm 18+</button>
+        <a class="btn btn-outline btn-lg" href="https://www.google.com" rel="noopener noreferrer">No, take me away</a>
+      </div>
+      <p class="fine-print">Your confirmation is saved on this device.</p>
+    </div>
+
+    <!-- Stage B: auth prompt (blur gone, but navigation stays locked) -->
+    <div class="gate-card hidden" data-stage="auth">
+      <span class="eyebrow">Members only</span>
+      <h2>Sign in to explore the club</h2>
+      <p class="muted">
+        Create a free Supporter account or sign in. The site stays locked
+        for navigation until you do.
       </p>
       <div class="gate-actions">
         <button class="btn btn-primary btn-lg" onclick="openModal('register')">Create Supporter account</button>

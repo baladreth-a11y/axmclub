@@ -1165,14 +1165,25 @@
   }
 
   /* ---- Gate overlay (blur + sign-in prompt) ---------------------- */
-  body.is-gated > :not(.navbar):not(.modal-backdrop):not(.toast):not(#gate) {
+  /* Blur applies only while age has not been confirmed. */
+  body.is-age-gated > :not(.navbar):not(.modal-backdrop):not(.toast):not(#gate) {
     filter: blur(8px);
-    pointer-events: none;
-    user-select: none;
     transition: filter var(--medium);
   }
-  body:not(.is-gated) > :not(.navbar):not(.modal-backdrop):not(.toast):not(#gate) {
+  body:not(.is-age-gated) > :not(.navbar):not(.modal-backdrop):not(.toast):not(#gate) {
     filter: none;
+    transition: filter var(--medium);
+  }
+  /* Interaction stays locked while signed out, even after unblurring. */
+  body.is-gated > :not(.navbar):not(.modal-backdrop):not(.toast):not(#gate) {
+    pointer-events: none;
+    user-select: none;
+  }
+  /* Lock nav anchor navigation too, but keep sign-in / join buttons live. */
+  body.is-gated .nav-links a,
+  body.is-gated .nav-links .nav-dropdown-toggle {
+    pointer-events: none;
+    opacity: 0.55;
   }
   .gate {
     position: fixed; inset: 0;
