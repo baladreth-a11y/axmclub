@@ -19,12 +19,20 @@
         <span class="brand-name">AxMclub<span class="brand-accent">.com</span></span>
       </a>
       <nav class="nav-links" aria-label="Primary">
-        <a href="#tasks">Tasks</a>
-        <a href="#roulette">Roulette</a>
-        <a href="#rewards">Rewards</a>
-        <a href="#catalog">Catalog</a>
-        <a href="#camroom">Cam Room</a>
-        <a href="#leaderboard">Leaderboard</a>
+        <div class="nav-item nav-dropdown">
+          <button type="button" class="nav-link nav-dropdown-toggle" aria-haspopup="true">
+            Support &amp; Rewards <span class="chev" aria-hidden="true">▾</span>
+          </button>
+          <div class="nav-dropdown-menu" role="menu">
+            <a role="menuitem" href="#tasks">Daily tasks</a>
+            <a role="menuitem" href="#roulette">Roulette</a>
+            <a role="menuitem" href="#rewards">Rewards tiers</a>
+          </div>
+        </div>
+        <a class="nav-link" href="#camroom">Cam Room</a>
+        <a class="nav-link" href="#supporters">Top Supporters</a>
+        <a class="nav-link" href="#marketplace">Marketplace</a>
+        <a class="nav-link" href="#party-roster">AxM Party Roster</a>
       </nav>
       <div class="nav-actions">
         <button id="openLogin" class="btn btn-ghost">Sign in</button>
@@ -39,6 +47,131 @@
       </div>
     </div>
   </header>
+
+  <!-- AXM PROFILES BANNER -->
+  <section class="profiles-banner" aria-labelledby="profilesBannerTitle">
+    <div class="container profiles-banner-inner">
+      <span class="eyebrow">Featured</span>
+      <h2 id="profilesBannerTitle" class="profiles-banner-title">AxM<span class="brand-accent">cam</span>Players</h2>
+      <p class="muted">The roster behind the club — connect directly on Telegram, Snap or their webcam channel.</p>
+    </div>
+  </section>
+
+  <!-- AXM MODEL PROFILES -->
+  <section id="players" class="section players-section">
+    <div class="container">
+      <div class="players-grid">
+        <article class="player-card">
+          <a class="player-photo player-photo-1" href="#player-nova" aria-label="View Nova">
+            <span class="player-initial">N</span>
+            <span class="player-status"><span class="pulse"></span>LIVE</span>
+          </a>
+          <div class="player-body">
+            <header class="player-head">
+              <h3>Nova</h3>
+              <span class="badge badge-gold">Headliner</span>
+            </header>
+            <p class="muted">Fridays, 21:00 — jazz + synthwave sets.</p>
+            <ul class="player-links" role="list">
+              <li><a href="https://t.me/" data-kind="telegram">Telegram</a></li>
+              <li><a href="#" data-kind="snap">Snap</a></li>
+              <li><a href="#camroom" data-kind="webcam">Webcam</a></li>
+            </ul>
+          </div>
+        </article>
+
+        <article class="player-card">
+          <a class="player-photo player-photo-2" href="#player-lux" aria-label="View Lux">
+            <span class="player-initial">L</span>
+          </a>
+          <div class="player-body">
+            <header class="player-head">
+              <h3>Lux</h3>
+              <span class="badge badge-accent">Host</span>
+            </header>
+            <p class="muted">Warm-up host. Sunday brunch streams.</p>
+            <ul class="player-links" role="list">
+              <li><a href="https://t.me/" data-kind="telegram">Telegram</a></li>
+              <li><a href="#" data-kind="snap">Snap</a></li>
+              <li><a href="#camroom" data-kind="webcam">Webcam</a></li>
+            </ul>
+          </div>
+        </article>
+
+        <article class="player-card">
+          <a class="player-photo player-photo-3" href="#player-vega" aria-label="View Vega">
+            <span class="player-initial">V</span>
+          </a>
+          <div class="player-body">
+            <header class="player-head">
+              <h3>Vega</h3>
+              <span class="badge badge-muted">DJ</span>
+            </header>
+            <p class="muted">Deep house, irregular drops.</p>
+            <ul class="player-links" role="list">
+              <li><a href="https://t.me/" data-kind="telegram">Telegram</a></li>
+              <li><a href="#" data-kind="snap">Snap</a></li>
+              <li><a href="#camroom" data-kind="webcam">Webcam</a></li>
+            </ul>
+          </div>
+        </article>
+
+        <article class="player-card">
+          <a class="player-photo player-photo-4" href="#player-iris" aria-label="View Iris">
+            <span class="player-initial">I</span>
+          </a>
+          <div class="player-body">
+            <header class="player-head">
+              <h3>Iris</h3>
+              <span class="badge badge-muted">Resident</span>
+            </header>
+            <p class="muted">Wednesday resident. Q&amp;A nights.</p>
+            <ul class="player-links" role="list">
+              <li><a href="https://t.me/" data-kind="telegram">Telegram</a></li>
+              <li><a href="#" data-kind="snap">Snap</a></li>
+              <li><a href="#camroom" data-kind="webcam">Webcam</a></li>
+            </ul>
+          </div>
+        </article>
+
+        <article class="player-card">
+          <a class="player-photo player-photo-5" href="#player-nyx" aria-label="View Nyx">
+            <span class="player-initial">N</span>
+          </a>
+          <div class="player-body">
+            <header class="player-head">
+              <h3>Nyx</h3>
+              <span class="badge badge-accent">After-hours</span>
+            </header>
+            <p class="muted">Late-night sets, members only.</p>
+            <ul class="player-links" role="list">
+              <li><a href="https://t.me/" data-kind="telegram">Telegram</a></li>
+              <li><a href="#" data-kind="snap">Snap</a></li>
+              <li><a href="#camroom" data-kind="webcam">Webcam</a></li>
+            </ul>
+          </div>
+        </article>
+
+        <article class="player-card">
+          <a class="player-photo player-photo-6" href="#player-sable" aria-label="View Sable">
+            <span class="player-initial">S</span>
+          </a>
+          <div class="player-body">
+            <header class="player-head">
+              <h3>Sable</h3>
+              <span class="badge badge-muted">Podcaster</span>
+            </header>
+            <p class="muted">Biweekly interviews with members.</p>
+            <ul class="player-links" role="list">
+              <li><a href="https://t.me/" data-kind="telegram">Telegram</a></li>
+              <li><a href="#" data-kind="snap">Snap</a></li>
+              <li><a href="#camroom" data-kind="webcam">Webcam</a></li>
+            </ul>
+          </div>
+        </article>
+      </div>
+    </div>
+  </section>
 
   <!-- HERO -->
   <section class="hero">
@@ -200,13 +333,13 @@
     </div>
   </section>
 
-  <!-- CATALOG -->
-  <section id="catalog" class="section">
+  <!-- MARKETPLACE -->
+  <section id="marketplace" class="section">
     <div class="container">
       <div class="section-head">
-        <span class="eyebrow">Redeem your points</span>
-        <h2>Rewards catalog</h2>
-        <p class="muted">Spend your points on exclusive perks. New drops every month.</p>
+        <span class="eyebrow">Spend your points</span>
+        <h2>Marketplace</h2>
+        <p class="muted">Exchange points for exclusive perks. New drops every month.</p>
       </div>
       <div id="catalogGrid" class="catalog-grid">
         <p class="lb-empty">Loading…</p>
@@ -259,13 +392,13 @@
     </div>
   </section>
 
-  <!-- LEADERBOARD -->
-  <section id="leaderboard" class="section section-alt">
+  <!-- TOP SUPPORTERS -->
+  <section id="supporters" class="section section-alt">
     <div class="container">
       <div class="section-head">
-        <span class="eyebrow">Top members</span>
-        <h2>Leaderboard</h2>
-        <p class="muted">The top 10 members by points. Spin daily to climb.</p>
+        <span class="eyebrow">Hall of fame</span>
+        <h2>Top Supporters</h2>
+        <p class="muted">The members keeping the lights on. Climb the list by spinning and claiming.</p>
       </div>
       <div class="leaderboard-card">
         <div class="leaderboard-head">
@@ -278,6 +411,51 @@
           <li class="lb-empty">Loading…</li>
         </ol>
       </div>
+    </div>
+  </section>
+
+  <!-- AXM PARTY ROSTER -->
+  <section id="party-roster" class="section">
+    <div class="container">
+      <div class="section-head">
+        <span class="eyebrow">What's on</span>
+        <h2>AxM Party Roster</h2>
+        <p class="muted">Upcoming members-only parties, hosts and streams.</p>
+      </div>
+      <ol class="party-list">
+        <li class="party-row">
+          <time class="party-date"><b>Fri</b><span>Dec 12</span></time>
+          <div class="party-main">
+            <h3>Winter Lights</h3>
+            <p class="muted">Hosted by Nova · cam-room after-party</p>
+          </div>
+          <span class="badge badge-gold">Gold+</span>
+        </li>
+        <li class="party-row">
+          <time class="party-date"><b>Sat</b><span>Dec 20</span></time>
+          <div class="party-main">
+            <h3>Late-night Salon</h3>
+            <p class="muted">Hosted by Nyx · streams until 02:00</p>
+          </div>
+          <span class="badge badge-accent">Platinum</span>
+        </li>
+        <li class="party-row">
+          <time class="party-date"><b>Sun</b><span>Jan 04</span></time>
+          <div class="party-main">
+            <h3>Sunday Brunch Live</h3>
+            <p class="muted">Hosted by Lux · open mic segment</p>
+          </div>
+          <span class="badge badge-muted">All members</span>
+        </li>
+        <li class="party-row">
+          <time class="party-date"><b>Wed</b><span>Jan 14</span></time>
+          <div class="party-main">
+            <h3>Resident Q&amp;A</h3>
+            <p class="muted">Hosted by Iris · member questions</p>
+          </div>
+          <span class="badge badge-muted">All members</span>
+        </li>
+      </ol>
     </div>
   </section>
 

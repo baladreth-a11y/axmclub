@@ -196,7 +196,7 @@ try {
     $html = Invoke-WebRequest -Uri ($Base + '/') -UseBasicParsing
     Check 'GET / returns 200' ($html.StatusCode -eq 200)
     Check 'GET / contains AxMclub brand' ($html.Content -match 'AxMclub')
-    Check 'GET / contains #leaderboard section' ($html.Content -match 'id="leaderboard"')
+    Check 'GET / contains #supporters section' ($html.Content -match 'id="supporters"')
     Check 'GET / contains profile modal view' ($html.Content -match 'data-view="profile"')
 
     $js = Invoke-WebRequest -Uri ($Base + '/js/main.js') -UseBasicParsing
@@ -226,9 +226,13 @@ try {
     }
     Check 'DB file not servable (403)' ($forbidden -eq 403) ('got ' + $forbidden)
 
-    Check 'GET / contains #catalog section' ($html.Content -match 'id="catalog"')
-    Check 'GET / contains #camroom section' ($html.Content -match 'id="camroom"')
-    Check 'GET / contains #tasks section'   ($html.Content -match 'id="tasks"')
+    Check 'GET / contains #marketplace section'   ($html.Content -match 'id="marketplace"')
+    Check 'GET / contains #camroom section'       ($html.Content -match 'id="camroom"')
+    Check 'GET / contains #tasks section'         ($html.Content -match 'id="tasks"')
+    Check 'GET / contains #players section'       ($html.Content -match 'id="players"')
+    Check 'GET / contains #party-roster section'  ($html.Content -match 'id="party-roster"')
+    Check 'GET / contains AxMcamPlayers banner'   ($html.Content -match 'AxM.*cam.*Players')
+    Check 'GET / has Support & Rewards dropdown'  ($html.Content -match 'nav-dropdown-toggle')
 
     Section '11. Rewards catalog'
     $catAnon = Invoke-RestMethod -Uri ($Base + '/api/rewards')
