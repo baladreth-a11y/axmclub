@@ -1,0 +1,109 @@
+$ErrorActionPreference = 'Stop'
+$Root    = Split-Path -Parent $MyInvocation.MyCommand.Path
+$TestDir = Join-Path $env:TEMP ('axm-manual-' + [guid]::NewGuid().ToString('N').Substring(0,8))
+$Port    = 5176
+$Base    = 'http://localhost:' + $Port
+
+$pass = 0; $fail = 0
+function Ok($n, $c, $d='')  {
+  if ($c) { $script:pass++; Write-Host ("  [PASS] " + $n) -ForegroundColor Green }
+  else    { $script:fail++; $s = if ($d) { " :: $d" } else { '' }; Write-Host ("  [FAIL] " + $n + $s) -ForegroundColor Red }
+}
+function Code($ex) { try { [int]$ex.Exception.Response.StatusCode.Value__ } catch { 0 } }
+
+New-Item -ItemType Directory -Path $TestDir -Force | Out-Null
+Copy-Item (Join-Path $Root 'server.ps1') (Join-Path $TestDir 'server.ps1')
+Copy-Item (Join-Path $Root 'index.html') (Join-Path $TestDir 'index.html')
+Copy-Item (Join-Path $Root 'styles.css') (Join-Path $TestDir 'styles.css')
+Copy-Item -Recurse (Join-Path $Root 'js') (Join-Path $TestDir 'js')
+
+$sp = Start-Process powershell -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $TestDir 'server.ps1'),'-Port',$Port -PassThru -WindowStyle Hidden `
+  -RedirectStandardOutput (Join-Path $TestDir 'out.log') -RedirectStandardError (Join-Path $TestDir 'err.log')
+Start-Sleep -Seconds 2
+
+try {
+  for ($i=0; $i -lt 20; $i++) {
+    try { $null = Invoke-RestMethod -Uri ($Base + '/api/stats') -TimeoutSec 2; break } catch { Start-Sleep -Milliseconds 500 }
+  }
+
+  Write-Host ""
+  Write-Host "== 1. Anonymous HTML gate state ==" -ForegroundColor Cyan
+  $html = Invoke-WebRequest -Uri ($Base + '/') -UseBasicParsing
+  Ok 'GET / returns 200'                       ($html.StatusCode -eq 200)
+  Ok 'Body has is-gated class'                 ($html.Content -match 'body class="is-gated"')
+  Ok 'Gate overlay is visible (no hidden)'     ($html.Content -match 'id="gate" class="gate"[^h]')
+  Ok 'Register form has acct-segment'          ($html.Content -match 'class="acct-segment"')
+  Ok 'Gate CTA says Create Supporter account'  ($html.Content -match 'Create Supporter account')
+
+  Write-Host ""
+  Write-Host "== 2. Anonymous /api/me is null ==" -ForegroundColor Cyan
+  $me0 = Invoke-RestMethod -Uri ($Base + '/api/me')
+  Ok '/api/me.user is null before login' ($null -eq $me0.user)
+
+  Write-Host ""
+  Write-Host "== 3. Register as Model is rejected ==" -ForegroundColor Cyan
+  $modelCode = 0
+  try {
+    $null = Invoke-RestMethod -Uri ($Base + '/api/register') -Method Post -ContentType 'application/json' `
+      -Body (@{ name='Mo Del'; email='mo@example.com'; password='abcd'; accountType='model' } | ConvertTo-Json)
+  } catch { $modelCode = Code $_ }
+  Ok 'Model registration returns 403' ($modelCode -eq 403) ('got ' + $modelCode)
+
+  Write-Host ""
+  Write-Host "== 4. Register as Supporter succeeds ==" -ForegroundColor Cyan
+  $sess = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+  $reg = Invoke-RestMethod -Uri ($Base + '/api/register') -Method Post -ContentType 'application/json' -WebSession $sess `
+    -Body (@{ name='Sam Support'; email='sam@example.com'; password='abcd'; accountType='supporter' } | ConvertTo-Json)
+  Ok 'Register returns user'                      ($reg.user -and $reg.user.email -eq 'sam@example.com')
+  Ok 'Returned accountType is supporter'          ($reg.user.accountType -eq 'supporter') ('got ' + $reg.user.accountType)
+  Ok 'Session cookie was set (sid present)'       ($sess.Cookies.GetCookies($Base) | Where-Object { $_.Name -eq 'sid' } | Select-Object -First 1)
+  Ok 'Initial balance is 0'                       ($reg.user.points -eq 0)
+  Ok 'Initial tier is Silver'                     ($reg.user.tier -eq 'Silver')
+
+  Write-Host ""
+  Write-Host "== 5. /api/me echoes the new user (session works) ==" -ForegroundColor Cyan
+  $me1 = Invoke-RestMethod -Uri ($Base + '/api/me') -WebSession $sess
+  Ok '/api/me returns the logged-in user' ($me1.user -and $me1.user.email -eq 'sam@example.com')
+  Ok '/api/me reports accountType'        ($me1.user.accountType -eq 'supporter')
+
+  Write-Host ""
+  Write-Host "== 6. Logout clears the session ==" -ForegroundColor Cyan
+  $null = Invoke-RestMethod -Uri ($Base + '/api/logout') -Method Post -WebSession $sess
+  $me2 = Invoke-RestMethod -Uri ($Base + '/api/me') -WebSession $sess
+  Ok '/api/me.user is null after logout' ($null -eq $me2.user)
+
+  Write-Host ""
+  Write-Host "== 7. Re-login as supporter keeps points + accountType ==" -ForegroundColor Cyan
+  $login = Invoke-RestMethod -Uri ($Base + '/api/login') -Method Post -ContentType 'application/json' -WebSession $sess `
+    -Body (@{ email='sam@example.com'; password='abcd' } | ConvertTo-Json)
+  Ok 'Login returns the user'               ($login.user.email -eq 'sam@example.com')
+  Ok 'accountType persisted through login'  ($login.user.accountType -eq 'supporter')
+
+  Write-Host ""
+  Write-Host "== 8. Duplicate email is rejected ==" -ForegroundColor Cyan
+  $dupCode = 0
+  try {
+    $null = Invoke-RestMethod -Uri ($Base + '/api/register') -Method Post -ContentType 'application/json' `
+      -Body (@{ name='Sam 2'; email='sam@example.com'; password='abcd' } | ConvertTo-Json)
+  } catch { $dupCode = Code $_ }
+  Ok 'Duplicate email returns 409' ($dupCode -eq 409) ('got ' + $dupCode)
+
+  Write-Host ""
+  Write-Host "== 9. Weak password is rejected ==" -ForegroundColor Cyan
+  $weakCode = 0
+  try {
+    $null = Invoke-RestMethod -Uri ($Base + '/api/register') -Method Post -ContentType 'application/json' `
+      -Body (@{ name='Weak'; email='weak@example.com'; password='x' } | ConvertTo-Json)
+  } catch { $weakCode = Code $_ }
+  Ok 'Weak password returns 400' ($weakCode -eq 400) ('got ' + $weakCode)
+
+  Write-Host ""
+  Write-Host ("== Manual verify summary: " + $pass + ' passed, ' + $fail + ' failed ==') -ForegroundColor $(if ($fail) { 'Red' } else { 'Green' })
+}
+finally {
+  try { Stop-Process -Id $sp.Id -Force -ErrorAction SilentlyContinue } catch {}
+  Start-Sleep -Milliseconds 500
+  if ($fail -eq 0) { Remove-Item -Recurse -Force $TestDir -ErrorAction SilentlyContinue }
+  else { Write-Host ("Temp dir kept: " + $TestDir) }
+}
+if ($fail -ne 0) { exit 1 }
