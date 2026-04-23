@@ -37,5 +37,8 @@ export const api = {
   camRedeemPassword: password => request('/api/cam/redeem-password', { method: 'POST', body: { password } }),
 
   tasks:             () => request('/api/tasks'),
-  claimTask:         taskId => request('/api/tasks/claim', { method: 'POST', body: { taskId } })
+  claimTask:         taskId => request('/api/tasks/claim', { method: 'POST', body: { taskId } }),
+
+  buyTokens:         amount => request('/api/tokens/buy', { method: 'POST', body: { amount } }),
+  makeOffer:         body   => request('/api/offer',      { method: 'POST', body })
 };

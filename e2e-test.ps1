@@ -260,6 +260,14 @@ try {
     # Three player cards (count of <article class="player-card">).
     $playerCardCount = ([regex]::Matches($html.Content, 'class="player-card"')).Count
     Check 'Players grid has exactly 3 cards' ($playerCardCount -eq 3) ('got ' + $playerCardCount)
+    Check 'GET / has #top-strip section'          ($html.Content -match 'id="top-strip"')
+    Check 'GET / has stats widget'                ($html.Content -match 'class="stats-widget"')
+    Check 'GET / has Rank stat'                   ($html.Content -match 'id="widgetRank"')
+    Check 'GET / has Level stat'                  ($html.Content -match 'id="widgetLevel"')
+    Check 'GET / has Tokens stat'                 ($html.Content -match 'id="widgetTokens"')
+    Check 'GET / has Get Tokens button'           ($html.Content -match 'id="widgetGetTokens"')
+    Check 'GET / has Make Offer button'           ($html.Content -match 'id="widgetMakeOffer"')
+    Check 'GET / has event panel'                 ($html.Content -match 'class="event-panel"')
 
     Section '11. Rewards catalog'
     $catAnon = Invoke-RestMethod -Uri ($Base + '/api/rewards')
@@ -400,6 +408,50 @@ try {
     }
     catch { $onceCode = StatusCodeOf $_ }
     Check 'One-time task claimed twice returns 409' ($onceCode -eq 409) ('got ' + $onceCode)
+
+    Section '16. Tokens + offers + economy fields'
+    $meEcon = Invoke-RestMethod -Uri ($Base + '/api/me') -WebSession $aliceSession
+    Check 'user.tokens defaults to 0'  ($meEcon.user.tokens -eq 0)
+    Check 'user.rank defaults to empty' ([string]::IsNullOrEmpty($meEcon.user.rank))
+    Check 'user.level equals points'   ($meEcon.user.level -eq [int]$meEcon.user.points)
+
+    $anonBuy = 0
+    try {
+        $null = Invoke-RestMethod -Uri ($Base + '/api/tokens/buy') -Method Post -ContentType 'application/json' -Body (JsonBody @{ amount=100 })
+    }
+    catch { $anonBuy = StatusCodeOf $_ }
+    Check 'Anonymous tokens/buy returns 401' ($anonBuy -eq 401) ('got ' + $anonBuy)
+
+    $badAmt = 0
+    try {
+        $null = Invoke-RestMethod -Uri ($Base + '/api/tokens/buy') -Method Post -ContentType 'application/json' -WebSession $aliceSession -Body (JsonBody @{ amount=37 })
+    }
+    catch { $badAmt = StatusCodeOf $_ }
+    Check 'Invalid pack size returns 400' ($badAmt -eq 400) ('got ' + $badAmt)
+
+    $buy = Invoke-RestMethod -Uri ($Base + '/api/tokens/buy') -Method Post -ContentType 'application/json' -WebSession $aliceSession -Body (JsonBody @{ amount=500 })
+    Check 'Buying 500 tokens succeeds'           ($buy.ok -eq $true)
+    Check 'Tokens balance bumps to 500'           ($buy.user.tokens -eq 500)
+    Check 'Level equals points + tokens'          ($buy.user.level -eq ([int]$buy.user.points + 500))
+
+    $anonOffer = 0
+    try {
+        $null = Invoke-RestMethod -Uri ($Base + '/api/offer') -Method Post -ContentType 'application/json' -Body (JsonBody @{ message='too short' })
+    }
+    catch { $anonOffer = StatusCodeOf $_ }
+    Check 'Anonymous offer returns 401' ($anonOffer -eq 401) ('got ' + $anonOffer)
+
+    $shortOffer = 0
+    try {
+        $null = Invoke-RestMethod -Uri ($Base + '/api/offer') -Method Post -ContentType 'application/json' -WebSession $aliceSession -Body (JsonBody @{ message='hi' })
+    }
+    catch { $shortOffer = StatusCodeOf $_ }
+    Check 'Short offer returns 400' ($shortOffer -eq 400) ('got ' + $shortOffer)
+
+    $offerOk = Invoke-RestMethod -Uri ($Base + '/api/offer') -Method Post -ContentType 'application/json' -WebSession $aliceSession -Body (JsonBody @{ target='Nova'; message='Looking for a custom 10-minute set.' })
+    Check 'Valid offer is accepted'            ($offerOk.ok -eq $true)
+    Check 'Offer has a generated id'           ($offerOk.offer.id -and $offerOk.offer.id.Length -gt 0)
+    Check 'Offer status starts as pending'     ($offerOk.offer.status -eq 'pending')
 
     Section '13. Streak + spin history'
     $aliceMe = Invoke-RestMethod -Uri ($Base + '/api/me') -WebSession $aliceSession

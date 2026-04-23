@@ -92,6 +92,59 @@
     </div>
   </section>
 
+  <!-- TOP STRIP: special event + member stats widget -->
+  <section id="top-strip" class="section top-strip" aria-label="Announcements and your stats">
+    <div class="container top-strip-inner">
+
+      <!-- Left: upcoming event / fallback to next party -->
+      <aside class="event-panel" aria-labelledby="eventPanelTitle">
+        <span class="eyebrow">Up next</span>
+        <h3 id="eventPanelTitle">Winter Lights</h3>
+        <p class="muted">Fri · Dec 12 · Hosted by Nova</p>
+        <p class="event-body">
+          The cam-room after-party. If a Special Event is scheduled we'll
+          feature it here — otherwise, it's the next stop on the Party Roster.
+        </p>
+        <div class="event-actions">
+          <a class="btn btn-outline" href="#party-roster">See the roster</a>
+        </div>
+      </aside>
+
+      <!-- Right: user profile stats widget -->
+      <aside class="stats-widget" aria-labelledby="statsWidgetTitle">
+        <h3 id="statsWidgetTitle" class="stats-widget-title">Your stats</h3>
+        <dl class="stats-widget-grid">
+          <div class="stat-row">
+            <dt>Rank</dt>
+            <dd id="widgetRank">—</dd>
+          </div>
+          <div class="stat-row">
+            <dt>Level</dt>
+            <dd id="widgetLevel">—</dd>
+          </div>
+          <div class="stat-row">
+            <dt>Points <small>(total)</small></dt>
+            <dd id="widgetPoints" class="is-points">—</dd>
+          </div>
+          <div class="stat-row">
+            <dt>Tokens <small>(total)</small></dt>
+            <dd id="widgetTokens" class="is-tokens">—</dd>
+          </div>
+        </dl>
+        <div class="stats-widget-actions">
+          <button id="widgetGetTokens" class="btn btn-primary" type="button">Get tokens</button>
+          <button id="widgetMakeOffer" class="btn btn-outline"  type="button">Make offer</button>
+        </div>
+        <p class="fine-print">
+          Rank is granted by a model after a 10-min webcam session.
+          Points come from roulette / rewards / model tips. Tokens are
+          the club's real currency and can be bought only.
+        </p>
+      </aside>
+
+    </div>
+  </section>
+
   <!-- AXM MODEL PROFILES -->
   <section id="players" class="section players-section">
     <div class="container">
@@ -543,6 +596,47 @@
           </label>
           <button class="btn btn-primary btn-block" type="submit">Sign in</button>
           <p class="switch">New here? <a href="#" onclick="switchView('register'); return false;">Create account</a></p>
+        </form>
+      </div>
+
+      <div class="modal-view hidden" data-view="tokens">
+        <h3>Get tokens</h3>
+        <p class="muted">Tokens are the club's real currency. Pick a pack below.</p>
+        <form id="tokensForm" class="form">
+          <div class="token-packs" role="radiogroup" aria-label="Token pack">
+            <label class="token-pack">
+              <input type="radio" name="amount" value="100" checked />
+              <span><strong>100</strong> tokens<small>$9.99</small></span>
+            </label>
+            <label class="token-pack">
+              <input type="radio" name="amount" value="500" />
+              <span><strong>500</strong> tokens<small>$39.99</small></span>
+            </label>
+            <label class="token-pack">
+              <input type="radio" name="amount" value="1200" />
+              <span><strong>1,200</strong> tokens<small>$79.99</small></span>
+            </label>
+            <label class="token-pack">
+              <input type="radio" name="amount" value="3000" />
+              <span><strong>3,000</strong> tokens<small>$179.99</small></span>
+            </label>
+          </div>
+          <button class="btn btn-primary btn-block" type="submit">Confirm purchase</button>
+          <p class="fine-print">Demo: no real payment is processed.</p>
+        </form>
+      </div>
+
+      <div class="modal-view hidden" data-view="offer">
+        <h3>Make an offer</h3>
+        <p class="muted">Propose a rank, a stream request, or a custom deal. The host team reviews every offer.</p>
+        <form id="offerForm" class="form">
+          <label>To (model name, optional)
+            <input name="target" type="text" placeholder="e.g. Nova" />
+          </label>
+          <label>Your offer
+            <textarea name="message" rows="5" required minlength="10" placeholder="What are you looking for and what are you offering in return?"></textarea>
+          </label>
+          <button class="btn btn-primary btn-block" type="submit">Send offer</button>
         </form>
       </div>
 

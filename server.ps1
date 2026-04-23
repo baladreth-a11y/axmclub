@@ -177,10 +177,18 @@ function Public-User($u) {
   if ($u.camPassExpires) { $camExp = [long]$u.camPassExpires }
   $acct = 'supporter'
   if ($u.accountType) { $acct = [string]$u.accountType }
+  $tokens = 0
+  if ($u.tokens) { $tokens = [int]$u.tokens }
+  $rank = ''
+  if ($u.rank)   { $rank   = [string]$u.rank }
+  $level = [int]$u.points + $tokens
   return @{
     name           = $u.name
     email          = $u.email
     points         = [int]$u.points
+    tokens         = $tokens
+    rank           = $rank
+    level          = $level
     lastSpin       = [long]$u.lastSpin
     joined         = [long]$u.joined
     tier           = (Get-Tier $u.points).name
@@ -285,6 +293,9 @@ function Handle-Api($req, $resp, $path, $method) {
         pwSalt      = $salt
         pwHash      = $hash
         points      = 0
+        tokens      = 0
+        rank        = ''
+        offers      = @()
         lastSpin    = 0
         joined      = NowMs
         accountType = $accountType
@@ -521,6 +532,54 @@ function Handle-Api($req, $resp, $path, $method) {
       $h = $s.user.history
       if (-not $h) { $h = @() }
       Send-Json $resp @{ history = @($h) }
+      return
+    }
+
+    'POST /api/tokens/buy' {
+      $s = Get-SessionUser $req $db
+      if (-not $s) { Send-Json $resp @{ error = 'Sign in required.' } 401; return }
+      $u = $s.user
+      $body = Read-JsonBody $req
+      $amount = 0
+      if ($body.amount) { $amount = [int]$body.amount }
+      # Accept a small set of preset packs only (demo mode — no real payment).
+      $allowed = @(100, 500, 1200, 3000)
+      if ($allowed -notcontains $amount) {
+        Send-Json $resp @{ error = 'Invalid pack size.' } 400; return
+      }
+      if (-not $u.tokens) { $u.tokens = 0 }
+      $u.tokens = [int]$u.tokens + $amount
+      Save-Db $db
+      Send-Json $resp @{
+        ok     = $true
+        bought = $amount
+        user   = (Public-User $u)
+      }
+      return
+    }
+
+    'POST /api/offer' {
+      $s = Get-SessionUser $req $db
+      if (-not $s) { Send-Json $resp @{ error = 'Sign in required.' } 401; return }
+      $u = $s.user
+      $body = Read-JsonBody $req
+      $target  = ("$($body.target)").Trim()
+      $message = ("$($body.message)").Trim()
+      if (-not $message -or $message.Length -lt 10) {
+        Send-Json $resp @{ error = 'Offer must be at least 10 characters.' } 400; return
+      }
+      if (-not $u.offers) { $u.offers = @() }
+      $offer = @{
+        id      = (New-Token)
+        target  = $target
+        message = $message
+        at      = (NowMs)
+        status  = 'pending'
+      }
+      $u.offers = @($u.offers) + $offer
+      if ($u.offers.Count -gt 20) { $u.offers = @($u.offers[-20..-1]) }
+      Save-Db $db
+      Send-Json $resp @{ ok = $true; offer = $offer }
       return
     }
 

@@ -12,6 +12,7 @@ import { initAuth } from './auth.js';
 import { initTasks, refreshTasks } from './tasks.js';
 import { initCamroom } from './camroom.js';
 import { initGate } from './gate.js';
+import { initUserWidget } from './userWidget.js';
 
 async function bootstrap() {
   $('#year').textContent = new Date().getFullYear();
@@ -27,6 +28,7 @@ async function bootstrap() {
   initCamroom();
   initProfile();
   initAuth();
+  initUserWidget();
 
   // Initial data load. Don't block UI on failures.
   const [meRes, statsRes] = await Promise.allSettled([api.me(), api.stats()]);
