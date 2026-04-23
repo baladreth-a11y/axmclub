@@ -66,6 +66,11 @@ $outLog       = Join-Path $TestDir 'out.log'
 $errLog       = Join-Path $TestDir 'err.log'
 $serverArgs   = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$serverScript,'-Port',$Port)
 
+# Admin panel needs AURUM_ADMIN_KEY set on the child process. Setting it
+# here ensures the spawned server inherits it.
+$AdminKey = 'e2e-admin-key-' + [guid]::NewGuid().ToString('N').Substring(0,8)
+$env:AURUM_ADMIN_KEY = $AdminKey
+
 $serverProc = Start-Process -FilePath 'powershell' -ArgumentList $serverArgs -PassThru -WindowStyle Hidden -RedirectStandardOutput $outLog -RedirectStandardError $errLog
 
 Start-Sleep -Seconds 2
@@ -409,6 +414,54 @@ try {
     catch { $onceCode = StatusCodeOf $_ }
     Check 'One-time task claimed twice returns 409' ($onceCode -eq 409) ('got ' + $onceCode)
 
+    Section '17. Admin panel'
+    # Anonymous (no x-admin-key) must be blocked on every admin endpoint.
+    $adminAnon = 0
+    try { $null = Invoke-RestMethod -Uri ($Base + '/api/admin/passwords') } catch { $adminAnon = StatusCodeOf $_ }
+    Check 'Anonymous GET /api/admin/passwords returns 403' ($adminAnon -eq 403) ('got ' + $adminAnon)
+
+    $adminHead = @{ 'x-admin-key' = $AdminKey }
+
+    # Passwords list: includes the three seeded codes.
+    $pwList = Invoke-RestMethod -Uri ($Base + '/api/admin/passwords') -Headers $adminHead
+    $codes  = ''
+    foreach ($p in @($pwList.passwords)) { $codes = $codes + ',' + $p.code }
+    Check 'Admin password list is non-empty' (@($pwList.passwords).Count -gt 0) ('count=' + @($pwList.passwords).Count)
+    Check 'List contains MODEL10'           ($codes -match 'MODEL10')
+    Check 'List contains OPEN-HOUSE'        ($codes -match 'OPEN-HOUSE')
+
+    # Create a new password via the (now admin-guarded) create-password endpoint.
+    $newPw = Invoke-RestMethod -Uri ($Base + '/api/cam/create-password') -Method Post -ContentType 'application/json' -Headers $adminHead -Body (JsonBody @{ password='E2E-PASS'; uses=2; note='from e2e' })
+    Check 'Admin can create a new password'  ($newPw.ok -eq $true)
+    Check 'Created password is uppercase'    ($newPw.password -eq 'E2E-PASS')
+    Check 'Created password has custom note' ($newPw.note -eq 'from e2e')
+
+    # Revoke that password.
+    $revoked = Invoke-RestMethod -Uri ($Base + '/api/admin/passwords/revoke') -Method Post -ContentType 'application/json' -Headers $adminHead -Body (JsonBody @{ code='E2E-PASS' })
+    Check 'Admin can revoke a password' ($revoked.ok -eq $true)
+
+    # After revoke, redeeming it returns 410 (used up).
+    $gone = 0
+    $tmpSess = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+    $null = Invoke-RestMethod -Uri ($Base + '/api/register') -Method Post -ContentType 'application/json' -WebSession $tmpSess -Body (JsonBody @{ name='Eve'; email='eve@example.com'; password='abcd' })
+    try {
+        $null = Invoke-RestMethod -Uri ($Base + '/api/cam/redeem-password') -Method Post -ContentType 'application/json' -WebSession $tmpSess -Body (JsonBody @{ password='E2E-PASS' })
+    } catch { $gone = StatusCodeOf $_ }
+    Check 'Revoked password returns 410' ($gone -eq 410) ('got ' + $gone)
+
+    # Revoke of unknown code returns 404.
+    $revokeMissing = 0
+    try {
+        $null = Invoke-RestMethod -Uri ($Base + '/api/admin/passwords/revoke') -Method Post -ContentType 'application/json' -Headers $adminHead -Body (JsonBody @{ code='DOES-NOT-EXIST' })
+    } catch { $revokeMissing = StatusCodeOf $_ }
+    Check 'Revoking unknown code returns 404' ($revokeMissing -eq 404) ('got ' + $revokeMissing)
+
+    # Offers list (Alice already submitted one earlier in Section 16).
+    # But Section 16 is defined AFTER this one in file order; we run it before,
+    # so for now at least Alice has no offers -- but future code may add some.
+    $offersResp = Invoke-RestMethod -Uri ($Base + '/api/admin/offers') -Headers $adminHead
+    Check 'Admin /api/admin/offers returns an array' ($null -ne $offersResp.offers)
+
     Section '16. Tokens + offers + economy fields'
     $meEcon = Invoke-RestMethod -Uri ($Base + '/api/me') -WebSession $aliceSession
     Check 'user.tokens defaults to 0'  ($meEcon.user.tokens -eq 0)
@@ -452,6 +505,25 @@ try {
     Check 'Valid offer is accepted'            ($offerOk.ok -eq $true)
     Check 'Offer has a generated id'           ($offerOk.offer.id -and $offerOk.offer.id.Length -gt 0)
     Check 'Offer status starts as pending'     ($offerOk.offer.status -eq 'pending')
+
+    Section '18. Admin offer status updates'
+    $adminHead2 = @{ 'x-admin-key' = $AdminKey }
+    $adminOffers = Invoke-RestMethod -Uri ($Base + '/api/admin/offers') -Headers $adminHead2
+    Check 'Admin now sees at least one offer' (@($adminOffers.offers).Count -ge 1) ('got ' + @($adminOffers.offers).Count)
+
+    $firstOffer = @($adminOffers.offers)[0]
+    $badStatus = 0
+    try {
+        $null = Invoke-RestMethod -Uri ($Base + '/api/admin/offers/status') -Method Post -ContentType 'application/json' -Headers $adminHead2 -Body (JsonBody @{ userEmail=$firstOffer.from; offerId=$firstOffer.id; status='nope' })
+    } catch { $badStatus = StatusCodeOf $_ }
+    Check 'Invalid offer status returns 400' ($badStatus -eq 400) ('got ' + $badStatus)
+
+    $accepted = Invoke-RestMethod -Uri ($Base + '/api/admin/offers/status') -Method Post -ContentType 'application/json' -Headers $adminHead2 -Body (JsonBody @{ userEmail=$firstOffer.from; offerId=$firstOffer.id; status='accepted' })
+    Check 'Offer accepted via admin' ($accepted.status -eq 'accepted')
+
+    $reread = Invoke-RestMethod -Uri ($Base + '/api/admin/offers') -Headers $adminHead2
+    $refreshed = @($reread.offers) | Where-Object { $_.id -eq $firstOffer.id } | Select-Object -First 1
+    Check 'Offer status persists as accepted' ($refreshed.status -eq 'accepted')
 
     Section '13. Streak + spin history'
     $aliceMe = Invoke-RestMethod -Uri ($Base + '/api/me') -WebSession $aliceSession

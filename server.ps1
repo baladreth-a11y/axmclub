@@ -287,6 +287,20 @@ function Require-Auth($req, $resp, $db) {
   return $s.user
 }
 
+# Returns $true if the request carries a valid x-admin-key that matches
+# the AURUM_ADMIN_KEY env var. On failure writes a 403 and returns $false.
+# Admin auth is intentionally env-driven so the admin panel stays disabled
+# until an operator opts in by setting the key.
+function Require-Admin($req, $resp) {
+  $adminKey = $env:AURUM_ADMIN_KEY
+  $given    = $req.Headers['x-admin-key']
+  if (-not $adminKey -or $given -ne $adminKey) {
+    Send-Json $resp @{ error = 'Admin only.' } 403
+    return $false
+  }
+  return $true
+}
+
 # ---- Auth: register / login / logout / me -------------------------------
 function Handle-Auth($req, $resp, $db, $path, $method) {
   $key = "$method $path"
@@ -711,22 +725,121 @@ function Handle-Cam($req, $resp, $db, $path, $method) {
     }
 
     'POST /api/cam/create-password' {
-      $adminKey = $env:AURUM_ADMIN_KEY
-      $given = $req.Headers['x-admin-key']
-      if (-not $adminKey -or $given -ne $adminKey) {
-        Send-Json $resp @{ error = 'Admin only.' } 403
-        return $true
-      }
+      if (-not (Require-Admin $req $resp)) { return $true }
       $body = Read-JsonBody $req
       $pw = ("$($body.password)").Trim().ToUpper()
       $uses = 1
       if ($body.uses) { $uses = [int]$body.uses }
+      $note = ("$($body.note)").Trim()
+      if (-not $note) { $note = 'Admin-issued' }
       if (-not $pw) {
         Send-Json $resp @{ error = 'password is required.' } 400
         return $true
       }
-      $Script:CamPasswords[$pw] = @{ uses = $uses; note = 'Admin-issued'; usesByUser = @{} }
-      Send-Json $resp @{ ok = $true; password = $pw; uses = $uses }
+      $Script:CamPasswords[$pw] = @{ uses = $uses; note = $note; usesByUser = @{} }
+      Send-Json $resp @{ ok = $true; password = $pw; uses = $uses; note = $note }
+      return $true
+    }
+  }
+  return $false
+}
+
+# ---- Admin: inspect passwords and offers --------------------------------
+function Handle-Admin($req, $resp, $db, $path, $method) {
+  $key = "$method $path"
+  switch ($key) {
+
+    'GET /api/admin/passwords' {
+      if (-not (Require-Admin $req $resp)) { return $true }
+      $list = @()
+      foreach ($code in $Script:CamPasswords.Keys) {
+        $entry = $Script:CamPasswords[$code]
+        $redeemers = @()
+        if ($entry.usesByUser) { $redeemers = @($entry.usesByUser.Keys) }
+        $list += @{
+          code          = $code
+          uses          = [int]$entry.uses
+          note          = [string]$entry.note
+          redeemedBy    = $redeemers
+          redeemedCount = $redeemers.Count
+        }
+      }
+      Send-Json $resp @{ passwords = @($list) }
+      return $true
+    }
+
+    'POST /api/admin/passwords/revoke' {
+      if (-not (Require-Admin $req $resp)) { return $true }
+      $body = Read-JsonBody $req
+      $code = ("$($body.code)").Trim().ToUpper()
+      if (-not $code -or -not $Script:CamPasswords.ContainsKey($code)) {
+        Send-Json $resp @{ error = 'Password not found.' } 404
+        return $true
+      }
+      $Script:CamPasswords[$code].uses = 0
+      Send-Json $resp @{ ok = $true; code = $code }
+      return $true
+    }
+
+    'GET /api/admin/offers' {
+      if (-not (Require-Admin $req $resp)) { return $true }
+      $all = @()
+      foreach ($email in $db.users.Keys) {
+        $u = $db.users[$email]
+        if (-not $u.offers) { continue }
+        foreach ($o in @($u.offers)) {
+          $status = 'pending'
+          if ($o.status) { $status = [string]$o.status }
+          $all += @{
+            id       = [string]$o.id
+            from     = [string]$u.email
+            fromName = [string]$u.name
+            target   = [string]$o.target
+            message  = [string]$o.message
+            status   = $status
+            at       = [long]$o.at
+          }
+        }
+      }
+      $all = @($all | Sort-Object -Property { [long]$_.at } -Descending)
+      Send-Json $resp @{ offers = $all }
+      return $true
+    }
+
+    'POST /api/admin/offers/status' {
+      if (-not (Require-Admin $req $resp)) { return $true }
+      $body = Read-JsonBody $req
+      $email   = ("$($body.userEmail)").Trim().ToLower()
+      $offerId = ("$($body.offerId)").Trim()
+      $status  = ("$($body.status)").Trim().ToLower()
+      $valid   = @('pending','accepted','declined')
+      if ($valid -notcontains $status) {
+        Send-Json $resp @{ error = 'Invalid status.' } 400
+        return $true
+      }
+      if (-not $db.users.ContainsKey($email)) {
+        Send-Json $resp @{ error = 'User not found.' } 404
+        return $true
+      }
+      $u = $db.users[$email]
+      if (-not $u.offers) {
+        Send-Json $resp @{ error = 'Offer not found.' } 404
+        return $true
+      }
+      $found = $false
+      foreach ($o in @($u.offers)) {
+        if ($o.id -eq $offerId) {
+          $o.status = $status
+          $found = $true
+          break
+        }
+      }
+      if (-not $found) {
+        Send-Json $resp @{ error = 'Offer not found.' } 404
+        return $true
+      }
+      Save-Db $db
+      Send-Json $resp @{ ok = $true; offerId = $offerId; status = $status }
       return $true
     }
   }
@@ -853,6 +966,7 @@ function Handle-Api($req, $resp, $path, $method) {
   if (Handle-Cam       $req $resp $db $path $method) { return }
   if (Handle-Tasks     $req $resp $db $path $method) { return }
   if (Handle-Community $req $resp $db $path $method) { return }
+  if (Handle-Admin     $req $resp $db $path $method) { return }
   Send-Json $resp @{ error = 'Not found.' } 404
 }
 
