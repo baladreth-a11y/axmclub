@@ -119,10 +119,27 @@ Results are also written to `e2e-results.log`. Exit code is non-zero on failure.
 ## Deploy (Option A: Windows VPS + Caddy)
 This is the path for a solo operator running one node with automatic HTTPS.
 Artifacts live under `deploy/`:
-- `deploy/Caddyfile` — reverse proxy + Let's Encrypt TLS config (replace the placeholder domain).
+- `deploy/bootstrap-vps.ps1` — **one-shot installer**: prereqs + clone + service + Caddy + backup task.
+- `deploy/Caddyfile` — reverse proxy + Let's Encrypt TLS template (domain is rewritten by the bootstrap).
 - `deploy/install-service.ps1` — installs `server.ps1` as a Windows service via NSSM (idempotent).
-- `deploy/backup-db.ps1` — nightly snapshot + rotation for `data/db.json` (wire it to `schtasks`).
-### Quick start on a fresh Windows VPS
+- `deploy/backup-db.ps1` — nightly snapshot + rotation for `data/db.json`.
+### One-shot bootstrap (recommended)
+From an **elevated PowerShell** on the fresh Windows Server 2022 VPS:
+```powershell
+Set-ExecutionPolicy Bypass -Scope Process -Force
+# Fetch the bootstrap directly from the repo:
+iwr 'https://raw.githubusercontent.com/<you>/<repo>/main/deploy/bootstrap-vps.ps1' -OutFile "$env:TEMP\bootstrap.ps1"
+& "$env:TEMP\bootstrap.ps1" -Domain 'yourdomain.com' -RepoUrl 'https://github.com/<you>/<repo>.git'
+```
+What it does (all idempotent):
+1. Installs PowerShell 7, Git, Caddy (winget), NSSM (chocolatey).
+2. Opens Windows firewall for 80 + 443.
+3. `git clone` (or `git pull`) into `C:\apps\axmclub`.
+4. Generates a 48-char `AURUM_ADMIN_KEY` if `-AdminKey` isn't supplied, and installs `server.ps1` as the `axmclub` service.
+5. Rewrites `Caddyfile` with your real domain, installs Caddy as the `caddy` service.
+6. Registers the nightly db.json backup via `schtasks`.
+7. Prints the admin key + the DNS records you still need to set in Cloudflare.
+### Manual step-by-step (if you'd rather not run the bootstrap)
 1. `winget install Microsoft.PowerShell` and `winget install CaddyServer.Caddy`; install NSSM (`choco install nssm` or the zip from nssm.cc).
 2. Copy the repo to `C:\apps\axmclub` and open ports 80 + 443 in the Windows firewall.
 3. From an elevated PowerShell 7:
