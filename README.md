@@ -116,8 +116,33 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\e2e-test.ps1
 
 Results are also written to `e2e-results.log`. Exit code is non-zero on failure.
 
+## Deploy (Option A: Windows VPS + Caddy)
+This is the path for a solo operator running one node with automatic HTTPS.
+Artifacts live under `deploy/`:
+- `deploy/Caddyfile` — reverse proxy + Let's Encrypt TLS config (replace the placeholder domain).
+- `deploy/install-service.ps1` — installs `server.ps1` as a Windows service via NSSM (idempotent).
+- `deploy/backup-db.ps1` — nightly snapshot + rotation for `data/db.json` (wire it to `schtasks`).
+### Quick start on a fresh Windows VPS
+1. `winget install Microsoft.PowerShell` and `winget install CaddyServer.Caddy`; install NSSM (`choco install nssm` or the zip from nssm.cc).
+2. Copy the repo to `C:\apps\axmclub` and open ports 80 + 443 in the Windows firewall.
+3. From an elevated PowerShell 7:
+   ```powershell
+   .\deploy\install-service.ps1 -InstallPath 'C:\apps\axmclub' -Port 8080 -AdminKey '<long-random-string>'
+   ```
+4. Edit `deploy/Caddyfile` to point at your real domain, drop it at `C:\Caddy\Caddyfile`, and run Caddy (or wrap it in its own NSSM service). Point DNS at the VPS; Caddy fetches the cert on first hit.
+5. Register the nightly backup:
+   ```powershell
+   schtasks /Create /TN "AxMclub DB backup" /SC DAILY /ST 03:30 /RL HIGHEST /RU SYSTEM `
+     /TR "powershell -NoProfile -ExecutionPolicy Bypass -File C:\apps\axmclub\deploy\backup-db.ps1 -InstallPath C:\apps\axmclub -BackupDir D:\backups\axmclub"
+   ```
+### Hardening checklist
+- Set `AURUM_ADMIN_KEY` to a 32+ char random string (the install script stores it in the service env, not in code).
+- Keep `admin.html` + `/api/admin/*` behind an IP allow-list at the Caddy layer (see the commented `@admin` matcher in `deploy/Caddyfile`) or Cloudflare Access.
+- Back up `data/db.json` to a different disk/UNC path than the one holding the app.
+- Rate-limit `/api/*` at the proxy (Caddy `rate_limit` plugin or Cloudflare rule) — the PowerShell listener is single-threaded.
+- Rotate the admin key periodically: `nssm set axmclub AppEnvironmentExtra 'AURUM_ADMIN_KEY=<new>'` then `Restart-Service axmclub`.
+- When HTTPS is stable on the domain for a week or two, uncomment HSTS in the Caddyfile.
 ## Security notes
-
 This is local-dev grade. For production you'd want HTTPS + `Secure` cookies,
 `bcrypt`/`argon2` instead of raw SHA-256, CSRF tokens, rate limiting, and a
 real database.

@@ -105,6 +105,27 @@
       background: var(--bg); border: 1px dashed var(--line);
       border-radius: var(--radius); margin: var(--space-5) 0;
     }
+    .admin-toolbar {
+      display: flex; flex-wrap: wrap; gap: var(--space-2);
+      margin-bottom: var(--space-3);
+      align-items: center;
+    }
+    .admin-toolbar select,
+    .admin-toolbar input[type="search"] {
+      background: var(--bg); border: 1px solid var(--line);
+      border-radius: var(--radius-sm); padding: 8px 12px; font-size: 13px;
+      color: var(--text);
+    }
+    .admin-toolbar input[type="search"] { flex: 1; min-width: 180px; }
+    .admin-toolbar select:focus,
+    .admin-toolbar input[type="search"]:focus {
+      outline: none; border-color: var(--gold);
+      box-shadow: 0 0 0 4px var(--gold-ring);
+    }
+    .admin-toolbar-count {
+      color: var(--muted); font-size: 12px;
+      margin-left: auto;
+    }
   </style>
 </head>
 <body>
@@ -151,6 +172,16 @@
     <!-- Offers -->
     <section id="offersSection" class="admin-card hidden">
       <h2>Member offers</h2>
+      <div class="admin-toolbar">
+        <select id="offersStatusFilter" aria-label="Filter by status">
+          <option value="">All statuses</option>
+          <option value="pending">Pending</option>
+          <option value="accepted">Accepted</option>
+          <option value="declined">Declined</option>
+        </select>
+        <input id="offersSearch" type="search" placeholder="Search name, email, or message…" aria-label="Search offers" />
+        <span id="offersCount" class="admin-toolbar-count">—</span>
+      </div>
       <table class="admin-table">
         <thead>
           <tr>

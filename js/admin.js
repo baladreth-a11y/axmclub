@@ -134,6 +134,10 @@ async function onRevoke(code) {
 }
 
 /* ---------- Offers ---------------------------------------------- */
+// Cache of the most recently fetched offers so filter/search can
+// re-render locally without another round-trip to the server.
+let offersCache = [];
+
 function offerRow(o) {
   const target = o.target && o.target.length ? escapeHtml(o.target) : '<span class="muted">—</span>';
   return `
@@ -153,18 +157,52 @@ function offerRow(o) {
     </tr>`;
 }
 
+function updateOffersCount(shown, total) {
+  const el = $('#offersCount');
+  if (!el) return;
+  if (!total) { el.textContent = '—'; return; }
+  el.textContent = shown === total
+    ? `${total} offer${total === 1 ? '' : 's'}`
+    : `${shown} / ${total}`;
+}
+
+function renderOffers() {
+  const tbody = $('#offersBody');
+  if (!tbody) return;
+
+  const statusFilter = ($('#offersStatusFilter')?.value || '').toLowerCase();
+  const q            = ($('#offersSearch')?.value || '').trim().toLowerCase();
+
+  const filtered = offersCache.filter(o => {
+    if (statusFilter && (o.status || '').toLowerCase() !== statusFilter) return false;
+    if (!q) return true;
+    const hay = [
+      o.fromName || '', o.from || '', o.message || '', o.target || ''
+    ].join(' \u0001 ').toLowerCase();
+    return hay.includes(q);
+  });
+
+  if (!offersCache.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="admin-empty">No offers yet.</td></tr>';
+  } else if (!filtered.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="admin-empty">No offers match the current filter.</td></tr>';
+  } else {
+    tbody.innerHTML = filtered.map(offerRow).join('');
+  }
+  updateOffersCount(filtered.length, offersCache.length);
+}
+
 async function loadOffers() {
   const tbody = $('#offersBody');
   tbody.innerHTML = '<tr><td colspan="6" class="admin-empty">Loading…</td></tr>';
   try {
     const { offers } = await adminFetch('/api/admin/offers');
-    if (!offers.length) {
-      tbody.innerHTML = '<tr><td colspan="6" class="admin-empty">No offers yet.</td></tr>';
-      return;
-    }
-    tbody.innerHTML = offers.map(offerRow).join('');
+    offersCache = Array.isArray(offers) ? offers : [];
+    renderOffers();
   } catch (err) {
+    offersCache = [];
     tbody.innerHTML = `<tr><td colspan="6" class="admin-empty">${escapeHtml(err.message)}</td></tr>`;
+    updateOffersCount(0, 0);
   }
 }
 
@@ -232,3 +270,8 @@ $('#offersBody').addEventListener('click', e => {
     setOfferStatus(decline.dataset.from, decline.dataset.id, 'declined');
   }
 });
+
+// Filter / search toolbar — re-render from the local cache so
+// typing feels instant and doesn't hammer the API.
+$('#offersStatusFilter')?.addEventListener('change', renderOffers);
+$('#offersSearch')?.addEventListener('input', renderOffers);

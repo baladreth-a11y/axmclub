@@ -92,16 +92,34 @@ function New-Token { [guid]::NewGuid().ToString('N') }
 function NowMs { [DateTimeOffset]::Now.ToUnixTimeMilliseconds() }
 
 # ---------- Domain ----------
-$Script:Segments = @(
-  @{ label='10 pts';  points=10  },
-  @{ label='50 pts';  points=50  },
-  @{ label='100 pts'; points=100 },
-  @{ label='25 pts';  points=25  },
-  @{ label='500 pts'; points=500 },
-  @{ label='20 pts';  points=20  },
-  @{ label='75 pts';  points=75  },
-  @{ label='5 pts';   points=5   }
-)
+# Wheel variants. Each key is a variantId the client can spin. The
+# 'default' variant is used when the client doesn't pass variantId.
+# Adding a themed wheel (e.g. holiday, event) is a hashtable entry —
+# no handler code changes needed.
+$Script:WheelVariants = @{
+  default = @(
+    @{ label='10 pts';  points=10  }
+    @{ label='50 pts';  points=50  }
+    @{ label='100 pts'; points=100 }
+    @{ label='25 pts';  points=25  }
+    @{ label='500 pts'; points=500 }
+    @{ label='20 pts';  points=20  }
+    @{ label='75 pts';  points=75  }
+    @{ label='5 pts';   points=5   }
+  )
+  weekend = @(
+    @{ label='15 pts';   points=15   }
+    @{ label='75 pts';   points=75   }
+    @{ label='150 pts';  points=150  }
+    @{ label='40 pts';   points=40   }
+    @{ label='750 pts';  points=750  }
+    @{ label='30 pts';   points=30   }
+    @{ label='100 pts';  points=100  }
+    @{ label='10 pts';   points=10   }
+  )
+}
+# Back-compat alias for any inline reference that still reads Segments.
+$Script:Segments = $Script:WheelVariants['default']
 $Script:CooldownMs        = 24 * 60 * 60 * 1000  # 24h
 $Script:StreakWindowMs    = 48 * 60 * 60 * 1000  # 48h grace to keep streak alive
 $Script:StreakBonusEvery  = 7
@@ -411,6 +429,15 @@ function Handle-Roulette($req, $resp, $db, $path, $method) {
     'POST /api/spin' {
       $u = Require-Auth $req $resp $db
       if (-not $u) { return $true }
+      $body = Read-JsonBody $req
+      $variantId = ("$($body.variantId)").Trim().ToLower()
+      if (-not $variantId) { $variantId = 'default' }
+      if (-not $Script:WheelVariants.ContainsKey($variantId)) {
+        Send-Json $resp @{ error = 'Unknown wheel variant.' } 400
+        return $true
+      }
+      $segments = $Script:WheelVariants[$variantId]
+
       $now = NowMs
       $elapsed = $now - [long]$u.lastSpin
       if ([long]$u.lastSpin -gt 0 -and $elapsed -lt $Script:CooldownMs) {
@@ -426,8 +453,8 @@ function Handle-Roulette($req, $resp, $db, $path, $method) {
         $newStreak = $prevStreak + 1
       }
 
-      $idx = Get-Random -Minimum 0 -Maximum $Script:Segments.Count
-      $seg = $Script:Segments[$idx]
+      $idx = Get-Random -Minimum 0 -Maximum $segments.Count
+      $seg = $segments[$idx]
       $tier = Get-Tier $u.points
       $tierBonus = [int][math]::Round(([int]$seg.points) * [double]$tier.bonus)
       $streakBonus = 0
@@ -470,8 +497,22 @@ function Handle-Roulette($req, $resp, $db, $path, $method) {
         streak      = $newStreak
         total       = $total
         tier        = $tier.name
+        variantId   = $variantId
         user        = (Public-User $u)
       }
+      return $true
+    }
+
+    'GET /api/roulette/variants' {
+      $list = @()
+      foreach ($id in $Script:WheelVariants.Keys) {
+        $segs = $Script:WheelVariants[$id]
+        $list += @{
+          id       = $id
+          segments = @($segs | ForEach-Object { @{ label = $_.label; points = [int]$_.points } })
+        }
+      }
+      Send-Json $resp @{ variants = @($list); default = 'default' }
       return $true
     }
 
