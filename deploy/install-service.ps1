@@ -22,7 +22,8 @@ param(
     [Parameter(Mandatory=$true)][int]$Port,
     [Parameter(Mandatory=$true)][string]$AdminKey,
     [string]$ServiceName = 'axmclub',
-    [string]$PwshPath    = 'C:\Program Files\PowerShell\7\pwsh.exe'
+    # If not supplied, we auto-detect pwsh on PATH or in common install roots.
+    [string]$PwshPath    = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -38,13 +39,40 @@ function Assert-Path($label, $path) {
     if (-not (Test-Path $path)) { throw "$label not found: $path" }
 }
 
+function Resolve-PwshPath {
+    # 1. Try PATH
+    $cmd = Get-Command pwsh.exe -ErrorAction SilentlyContinue
+    if ($cmd -and $cmd.Source -and (Test-Path $cmd.Source) -and ($cmd.Source -notlike '*WindowsApps*')) {
+        return $cmd.Source
+    }
+    # 2. Common install locations (MSI, winget, MSIX, Scoop)
+    $candidates = @(
+        "$env:ProgramFiles\PowerShell\7\pwsh.exe",
+        "$env:ProgramFiles\PowerShell\7-preview\pwsh.exe",
+        "${env:ProgramFiles(x86)}\PowerShell\7\pwsh.exe"
+    )
+    foreach ($c in $candidates) { if (Test-Path $c) { return $c } }
+    # 3. Glob winget package cache
+    $pkgRoot = "$env:LOCALAPPDATA\Microsoft\WinGet\Packages"
+    if (Test-Path $pkgRoot) {
+        $hit = Get-ChildItem -Path $pkgRoot -Filter 'pwsh.exe' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($hit) { return $hit.FullName }
+    }
+    return $null
+}
+
 Assert-Admin
 
 # Resolve + validate paths.
 $InstallPath = (Resolve-Path $InstallPath).Path
-Assert-Path 'InstallPath'          $InstallPath
-Assert-Path 'server.ps1'           (Join-Path $InstallPath 'server.ps1')
-Assert-Path 'PowerShell 7 (pwsh)'  $PwshPath
+Assert-Path 'InstallPath' $InstallPath
+Assert-Path 'server.ps1'  (Join-Path $InstallPath 'server.ps1')
+
+if (-not $PwshPath) { $PwshPath = Resolve-PwshPath }
+if (-not $PwshPath -or -not (Test-Path $PwshPath)) {
+    throw "PowerShell 7 (pwsh.exe) not found. Install it with:  winget install --id Microsoft.PowerShell -e"
+}
+Write-Host ("Using pwsh: " + $PwshPath) -ForegroundColor DarkGray
 
 # NSSM must be on PATH.
 $nssmCmd = Get-Command nssm.exe -ErrorAction SilentlyContinue
