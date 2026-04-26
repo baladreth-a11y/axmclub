@@ -126,6 +126,35 @@
       color: var(--muted); font-size: 12px;
       margin-left: auto;
     }
+    .admin-table .user-id strong { display: block; }
+    .admin-table .user-id small {
+      color: var(--muted); font-size: 11px;
+      display: block; margin-top: 2px;
+    }
+    .tier-badge {
+      display: inline-block; padding: 3px 8px; border-radius: var(--radius-pill);
+      font-size: 10px; font-weight: 700; letter-spacing: 0.10em; text-transform: uppercase;
+    }
+    .tier-badge.silver   { background: rgba(255,255,255,0.06); color: #c9cfdb; }
+    .tier-badge.gold     { background: var(--gold-soft); color: var(--gold); }
+    .tier-badge.platinum { background: rgba(124,108,255,0.16); color: var(--accent); }
+    /* Account-type pill */
+    .acct-pill {
+      display: inline-block; padding: 3px 8px; border-radius: var(--radius-pill);
+      font-size: 10px; font-weight: 600; letter-spacing: 0.10em; text-transform: uppercase;
+      background: rgba(255,255,255,0.04); color: var(--muted);
+    }
+    .acct-pill.model { background: var(--accent-soft); color: var(--accent); }
+    /* User edit modal: select + small form helpers */
+    #userEditBackdrop .modal { width: min(420px, 100%); }
+    #userEditBackdrop select {
+      background: var(--bg); border: 1px solid var(--line); color: var(--text);
+      border-radius: var(--radius-sm); padding: 12px 14px; font-size: 15px;
+    }
+    #userEditBackdrop select:focus {
+      outline: none; border-color: var(--gold);
+      box-shadow: 0 0 0 4px var(--gold-ring);
+    }
   </style>
 </head>
 <body>
@@ -133,7 +162,7 @@
     <header class="admin-head">
       <div>
         <h1>AxMclub admin</h1>
-        <p>Operator tools · manage cam passwords · review member offers</p>
+        <p>Operator tools · user accounts · cam passwords · member offers</p>
       </div>
       <div class="admin-key-bar">
         <input id="adminKeyInput" type="password" placeholder="x-admin-key" autocomplete="off" />
@@ -146,6 +175,66 @@
       Paste your <code>AURUM_ADMIN_KEY</code> above and hit <strong>Save</strong>
       to unlock the panel. The key is kept in <code>sessionStorage</code> for
       this tab only.
+    </div>
+
+    <!-- Users -->
+    <section id="usersSection" class="admin-card hidden">
+      <h2>User accounts</h2>
+      <div class="admin-toolbar">
+        <select id="usersTypeFilter" aria-label="Filter by account type">
+          <option value="">All types</option>
+          <option value="supporter">Supporter</option>
+          <option value="model">Model</option>
+        </select>
+        <select id="usersTierFilter" aria-label="Filter by tier">
+          <option value="">All tiers</option>
+          <option value="Silver">Silver</option>
+          <option value="Gold">Gold</option>
+          <option value="Platinum">Platinum</option>
+        </select>
+        <input id="usersSearch" type="search" placeholder="Search name or email…" aria-label="Search users" />
+        <span id="usersCount" class="admin-toolbar-count">—</span>
+      </div>
+      <table class="admin-table">
+        <thead>
+          <tr>
+            <th>Joined</th><th>Name / Email</th><th>Type</th><th>Tier</th><th>Points</th><th>Tokens</th><th>Streak</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="usersBody">
+          <tr><td colspan="8" class="admin-empty">Enter admin key to load.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- Edit user modal (only visible while editing; reuses .modal styles) -->
+    <div id="userEditBackdrop" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+      <div class="modal">
+        <button class="modal-close" type="button" id="userEditClose" aria-label="Close">×</button>
+        <h3>Edit user</h3>
+        <p class="muted" id="userEditEmail">—</p>
+        <form id="userEditForm" class="form">
+          <label>Display name
+            <input name="name" type="text" minlength="1" maxlength="60" required />
+          </label>
+          <label>Points
+            <input name="points" type="number" min="0" step="1" required />
+          </label>
+          <label>Tokens
+            <input name="tokens" type="number" min="0" step="1" required />
+          </label>
+          <label>Account type
+            <select name="accountType" required>
+              <option value="supporter">Supporter</option>
+              <option value="model">Model</option>
+            </select>
+          </label>
+          <label>Rank <small class="muted">(free-form, max 32 chars)</small>
+            <input name="rank" type="text" maxlength="32" />
+          </label>
+          <button class="btn btn-primary btn-block" type="submit">Save changes</button>
+        </form>
+      </div>
     </div>
 
     <!-- Cam passwords -->

@@ -60,6 +60,7 @@ async function adminFetch(path, opts = {}) {
 
 /* ---------- UI visibility ---------------------------------------- */
 function setUnlocked(on) {
+  $('#usersSection').classList.toggle('hidden', !on);
   $('#passwordsSection').classList.toggle('hidden', !on);
   $('#offersSection').classList.toggle('hidden', !on);
   $('#authNotice').classList.toggle('hidden', on);
@@ -219,6 +220,150 @@ async function setOfferStatus(userEmail, offerId, status) {
   }
 }
 
+/* ---------- Users ----------------------------------------------- */
+// Local cache + edit-modal state. The list endpoint returns a snapshot;
+// every adjust/delete just re-fetches.
+let usersCache = [];
+let editingEmail = null;
+
+function tierClass(tier) {
+  return ({ Silver: 'silver', Gold: 'gold', Platinum: 'platinum' }[tier] || 'silver');
+}
+
+function userRow(u) {
+  return `
+    <tr>
+      <td class="muted" style="white-space:nowrap">${escapeHtml(formatDate(u.joined))}</td>
+      <td class="user-id">
+        <strong>${escapeHtml(u.name || '—')}</strong>
+        <small>${escapeHtml(u.email)}</small>
+      </td>
+      <td><span class="acct-pill ${escapeHtml(u.accountType)}">${escapeHtml(u.accountType)}</span></td>
+      <td><span class="tier-badge ${tierClass(u.tier)}">${escapeHtml(u.tier)}</span></td>
+      <td>${u.points.toLocaleString()}</td>
+      <td>${u.tokens.toLocaleString()}</td>
+      <td class="muted">${u.streak ? '🔥 ' + u.streak : '—'}</td>
+      <td class="admin-row-actions">
+        <button class="btn btn-outline edit-user-btn" data-email="${escapeHtml(u.email)}">Edit</button>
+        <button class="btn btn-outline delete-user-btn" data-email="${escapeHtml(u.email)}" data-name="${escapeHtml(u.name || u.email)}">Delete</button>
+      </td>
+    </tr>`;
+}
+
+function updateUsersCount(shown, total) {
+  const el = $('#usersCount');
+  if (!el) return;
+  if (!total) { el.textContent = '—'; return; }
+  el.textContent = shown === total
+    ? `${total} user${total === 1 ? '' : 's'}`
+    : `${shown} / ${total}`;
+}
+
+function renderUsers() {
+  const tbody = $('#usersBody');
+  if (!tbody) return;
+  const typeF = ($('#usersTypeFilter')?.value || '').toLowerCase();
+  const tierF = ($('#usersTierFilter')?.value || '');
+  const q     = ($('#usersSearch')?.value || '').trim().toLowerCase();
+
+  const filtered = usersCache.filter(u => {
+    if (typeF && (u.accountType || '').toLowerCase() !== typeF) return false;
+    if (tierF && u.tier !== tierF) return false;
+    if (!q) return true;
+    const hay = ((u.name || '') + ' \u0001 ' + (u.email || '')).toLowerCase();
+    return hay.includes(q);
+  });
+
+  if (!usersCache.length) {
+    tbody.innerHTML = '<tr><td colspan="8" class="admin-empty">No users yet.</td></tr>';
+  } else if (!filtered.length) {
+    tbody.innerHTML = '<tr><td colspan="8" class="admin-empty">No users match the current filter.</td></tr>';
+  } else {
+    tbody.innerHTML = filtered.map(userRow).join('');
+  }
+  updateUsersCount(filtered.length, usersCache.length);
+}
+
+async function loadUsers() {
+  const tbody = $('#usersBody');
+  tbody.innerHTML = '<tr><td colspan="8" class="admin-empty">Loading…</td></tr>';
+  try {
+    const { users } = await adminFetch('/api/admin/users');
+    usersCache = Array.isArray(users) ? users : [];
+    renderUsers();
+  } catch (err) {
+    usersCache = [];
+    tbody.innerHTML = `<tr><td colspan="8" class="admin-empty">${escapeHtml(err.message)}</td></tr>`;
+    updateUsersCount(0, 0);
+  }
+}
+
+function openUserEdit(email) {
+  const u = usersCache.find(x => x.email === email);
+  if (!u) return;
+  editingEmail = email;
+  $('#userEditEmail').textContent = email;
+  const f = $('#userEditForm');
+  f.elements['name'].value        = u.name || '';
+  f.elements['points'].value      = u.points;
+  f.elements['tokens'].value      = u.tokens;
+  f.elements['accountType'].value = u.accountType;
+  f.elements['rank'].value        = u.rank || '';
+  $('#userEditBackdrop').classList.remove('hidden');
+  // Focus the points field by default (most-edited).
+  requestAnimationFrame(() => f.elements['points']?.focus());
+}
+
+function closeUserEdit() {
+  editingEmail = null;
+  $('#userEditBackdrop').classList.add('hidden');
+}
+
+async function onUserEditSubmit(e) {
+  e.preventDefault();
+  if (!editingEmail) return;
+  const fd = new FormData(e.target);
+  const body = {
+    email:       editingEmail,
+    name:        (fd.get('name') || '').toString().trim(),
+    points:      parseInt(fd.get('points'), 10) || 0,
+    tokens:      parseInt(fd.get('tokens'), 10) || 0,
+    accountType: fd.get('accountType'),
+    rank:        (fd.get('rank') || '').toString().trim()
+  };
+  try {
+    await adminFetch('/api/admin/users/adjust', {
+      method: 'POST',
+      body: JSON.stringify(body)
+    });
+    toast('User updated.', 'success');
+    closeUserEdit();
+    loadUsers();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+async function onUserDelete(email, displayName) {
+  // Two-prompt confirmation: irreversible action.
+  if (!confirm(`Delete account for ${displayName} (${email})?\nThis cannot be undone.`)) return;
+  const typed = prompt(`To confirm, type the email exactly:\n${email}`);
+  if ((typed || '').trim().toLowerCase() !== email.toLowerCase()) {
+    toast('Email did not match. Cancelled.', 'error');
+    return;
+  }
+  try {
+    await adminFetch('/api/admin/users/delete', {
+      method: 'POST',
+      body: JSON.stringify({ email })
+    });
+    toast(`Deleted ${email}.`, 'success');
+    loadUsers();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
 /* ---------- Key management -------------------------------------- */
 function applyKey(next) {
   adminKey = (next || '').trim();
@@ -229,6 +374,7 @@ function applyKey(next) {
   }
   setUnlocked(!!adminKey);
   if (adminKey) {
+    loadUsers();
     loadPasswords();
     loadOffers();
   }
@@ -238,6 +384,7 @@ function applyKey(next) {
 $('#adminKeyInput').value = adminKey;
 setUnlocked(!!adminKey);
 if (adminKey) {
+  loadUsers();
   loadPasswords();
   loadOffers();
 }
@@ -275,3 +422,26 @@ $('#offersBody').addEventListener('click', e => {
 // typing feels instant and doesn't hammer the API.
 $('#offersStatusFilter')?.addEventListener('change', renderOffers);
 $('#offersSearch')?.addEventListener('input', renderOffers);
+
+// Users tab: filter, edit, delete.
+$('#usersTypeFilter')?.addEventListener('change', renderUsers);
+$('#usersTierFilter')?.addEventListener('change', renderUsers);
+$('#usersSearch')?.addEventListener('input', renderUsers);
+
+$('#usersBody').addEventListener('click', e => {
+  const editBtn = e.target.closest('.edit-user-btn');
+  if (editBtn) { openUserEdit(editBtn.dataset.email); return; }
+  const delBtn = e.target.closest('.delete-user-btn');
+  if (delBtn)  { onUserDelete(delBtn.dataset.email, delBtn.dataset.name); }
+});
+
+$('#userEditClose').addEventListener('click', closeUserEdit);
+$('#userEditBackdrop').addEventListener('click', e => {
+  if (e.target.id === 'userEditBackdrop') closeUserEdit();
+});
+$('#userEditForm').addEventListener('submit', onUserEditSubmit);
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && !$('#userEditBackdrop').classList.contains('hidden')) {
+    closeUserEdit();
+  }
+});

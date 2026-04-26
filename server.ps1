@@ -883,6 +883,111 @@ function Handle-Admin($req, $resp, $db, $path, $method) {
       Send-Json $resp @{ ok = $true; offerId = $offerId; status = $status }
       return $true
     }
+
+    'GET /api/admin/users' {
+      if (-not (Require-Admin $req $resp)) { return $true }
+      $list = @()
+      foreach ($email in $db.users.Keys) {
+        $u = $db.users[$email]
+        $list += @{
+          email            = [string]$u.email
+          name             = [string]$u.name
+          accountType      = if ($u.accountType) { [string]$u.accountType } else { 'supporter' }
+          tier             = (Get-Tier $u.points).name
+          points           = [int]$u.points
+          tokens           = if ($u.tokens) { [int]$u.tokens } else { 0 }
+          rank             = if ($u.rank) { [string]$u.rank } else { '' }
+          streak           = if ($u.streak) { [int]$u.streak } else { 0 }
+          lastSpin         = [long]$u.lastSpin
+          joined           = [long]$u.joined
+          camPassExpires   = if ($u.camPassExpires) { [long]$u.camPassExpires } else { 0 }
+          redemptionsCount = if ($u.redemptions) { @($u.redemptions).Count } else { 0 }
+          offersCount      = if ($u.offers) { @($u.offers).Count } else { 0 }
+          taskClaimsCount  = if ($u.taskClaims) { @($u.taskClaims.Keys).Count } else { 0 }
+        }
+      }
+      $list = @($list | Sort-Object -Property { [long]$_.joined } -Descending)
+      Send-Json $resp @{ users = @($list); count = @($list).Count }
+      return $true
+    }
+
+    'POST /api/admin/users/adjust' {
+      if (-not (Require-Admin $req $resp)) { return $true }
+      $body = Read-JsonBody $req
+      $email = ("$($body.email)").Trim().ToLower()
+      if (-not $db.users.ContainsKey($email)) {
+        Send-Json $resp @{ error = 'User not found.' } 404
+        return $true
+      }
+      $u = $db.users[$email]
+      $changes = @{}
+      # Name (string, 1-60 chars)
+      if ($body.PSObject.Properties['name'] -or $body.ContainsKey('name')) {
+        $newName = ("$($body.name)").Trim()
+        if ($newName -and $newName.Length -le 60) {
+          $u.name = $newName
+          $changes.name = $newName
+        }
+      }
+      # Points (non-negative int)
+      if ($body.PSObject.Properties['points'] -or $body.ContainsKey('points')) {
+        $newPoints = [int]$body.points
+        if ($newPoints -lt 0) { $newPoints = 0 }
+        $u.points = $newPoints
+        $changes.points = $newPoints
+      }
+      # Tokens (non-negative int)
+      if ($body.PSObject.Properties['tokens'] -or $body.ContainsKey('tokens')) {
+        $newTokens = [int]$body.tokens
+        if ($newTokens -lt 0) { $newTokens = 0 }
+        $u.tokens = $newTokens
+        $changes.tokens = $newTokens
+      }
+      # AccountType (supporter|model)
+      if ($body.PSObject.Properties['accountType'] -or $body.ContainsKey('accountType')) {
+        $newType = ("$($body.accountType)").Trim().ToLower()
+        if ($newType -in @('supporter','model')) {
+          $u.accountType = $newType
+          $changes.accountType = $newType
+        }
+      }
+      # Rank (free-form string, max 32 chars)
+      if ($body.PSObject.Properties['rank'] -or $body.ContainsKey('rank')) {
+        $newRank = ("$($body.rank)").Trim()
+        if ($newRank.Length -le 32) {
+          $u.rank = $newRank
+          $changes.rank = $newRank
+        }
+      }
+      if ($changes.Keys.Count -eq 0) {
+        Send-Json $resp @{ error = 'No valid fields to adjust.' } 400
+        return $true
+      }
+      Save-Db $db
+      Send-Json $resp @{ ok = $true; email = $email; changes = $changes; user = (Public-User $u) }
+      return $true
+    }
+
+    'POST /api/admin/users/delete' {
+      if (-not (Require-Admin $req $resp)) { return $true }
+      $body = Read-JsonBody $req
+      $email = ("$($body.email)").Trim().ToLower()
+      if (-not $db.users.ContainsKey($email)) {
+        Send-Json $resp @{ error = 'User not found.' } 404
+        return $true
+      }
+      # Drop any active sessions belonging to this user, decrement member count.
+      $deadSids = @()
+      foreach ($sid in @($db.sessions.Keys)) {
+        if ($db.sessions[$sid] -eq $email) { $deadSids += $sid }
+      }
+      foreach ($sid in $deadSids) { $db.sessions.Remove($sid) | Out-Null }
+      $db.users.Remove($email) | Out-Null
+      $db.stats.members = [math]::Max(0, [int]$db.stats.members - 1)
+      Save-Db $db
+      Send-Json $resp @{ ok = $true; email = $email; sessionsDropped = $deadSids.Count }
+      return $true
+    }
   }
   return $false
 }
