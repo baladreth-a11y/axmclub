@@ -1049,19 +1049,23 @@ function Handle-Request($ctx) {
 }
 
 # ---------- Start listener ----------
+# HttpListener prefix matching is exact on the Host header. We register
+# both 'localhost' and '127.0.0.1' so reverse proxies (Caddy) and probes
+# that use the loopback IP literal route to the same listener. Both are
+# loopback-only so no URL ACL admin grant is required.
 $listener = New-Object System.Net.HttpListener
-$prefix = "http://localhost:$Port/"
-$listener.Prefixes.Add($prefix)
+$prefixes = @("http://localhost:$Port/", "http://127.0.0.1:$Port/")
+foreach ($p in $prefixes) { $listener.Prefixes.Add($p) }
 try { $listener.Start() }
 catch {
-  Write-Host "Could not bind to $prefix." -ForegroundColor Red
+  Write-Host ("Could not bind to: " + ($prefixes -join ', ')) -ForegroundColor Red
   Write-Host "Try a different port:  powershell -File .\server.ps1 -Port 8080" -ForegroundColor Yellow
   throw
 }
 
 Write-Host ""
 Write-Host "  AxMclub.com backend running" -ForegroundColor Green
-Write-Host "  -> $prefix" -ForegroundColor Cyan
+foreach ($p in $prefixes) { Write-Host ("  -> " + $p) -ForegroundColor Cyan }
 Write-Host "  -> DB file: $DbPath" -ForegroundColor DarkGray
 Write-Host "  Press Ctrl+C to stop."
 Write-Host ""
