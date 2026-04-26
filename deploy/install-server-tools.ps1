@@ -46,41 +46,59 @@ function Step([string]$msg) {
 function Ok([string]$msg)   { Write-Host ("    " + $msg) -ForegroundColor Green }
 function Info([string]$msg) { Write-Host ("    " + $msg) -ForegroundColor Gray }
 
-function Try-Winget([string]$id, [string]$label, [string]$probe) {
-    if ($probe -and (Have-Command $probe)) {
-        Info ("$label already on PATH ($probe). Skipping.")
+# Try winget first; fall back to Chocolatey. Windows Server commonly ships
+# without winget, but our bootstrap-vps.ps1 has already installed Chocolatey.
+function Try-Install {
+    param(
+        [string]$Label,
+        [string]$Probe,
+        [string]$WingetId,
+        [string]$ChocoId
+    )
+    if ($Probe -and (Have-Command $Probe)) {
+        Info ("$Label already on PATH ($Probe). Skipping.")
         return
     }
-    if (-not (Have-Command winget)) {
-        Info ("winget not available; install $label manually.")
+    if (Have-Command winget) {
+        Info ("winget install $WingetId ...")
+        & winget install --id $WingetId -e --accept-source-agreements --accept-package-agreements --silent | Out-Null
+        Ok ("$Label install attempt via winget complete.")
         return
     }
-    Info ("winget install $id ...")
-    & winget install --id $id -e --accept-source-agreements --accept-package-agreements --silent | Out-Null
-    Ok ("$label install attempt complete.")
+    if (Have-Command choco) {
+        Info ("choco install $ChocoId ...")
+        & choco install $ChocoId -y --no-progress | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            Ok ("$Label install attempt via choco complete.")
+        } else {
+            Info ("choco returned exit $LASTEXITCODE for $ChocoId; check the choco log.")
+        }
+        return
+    }
+    Info ("Neither winget nor choco available; install $Label manually.")
 }
 
 Step '1. VS Code'
-Try-Winget 'Microsoft.VisualStudioCode' 'VS Code' 'code'
+Try-Install -Label 'VS Code'             -Probe 'code'      -WingetId 'Microsoft.VisualStudioCode'  -ChocoId 'vscode'
 
 Step '2. Notepad++'
-Try-Winget 'Notepad++.Notepad++' 'Notepad++' 'notepad++'
+Try-Install -Label 'Notepad++'           -Probe 'notepad++' -WingetId 'Notepad++.Notepad++'         -ChocoId 'notepadplusplus'
 
 Step '3. Sysinternals Suite (Process Explorer, TCPView, Autoruns, Procmon, ...)'
-Try-Winget 'Microsoft.Sysinternals' 'Sysinternals Suite' 'procexp'
+Try-Install -Label 'Sysinternals Suite'  -Probe 'procexp'   -WingetId 'Microsoft.Sysinternals'      -ChocoId 'sysinternals'
 
-Step '4. bottom (btm) — terminal system monitor'
-Try-Winget 'Clement.bottom' 'bottom' 'btm'
+Step '4. bottom (btm) - terminal system monitor'
+Try-Install -Label 'bottom'              -Probe 'btm'       -WingetId 'Clement.bottom'              -ChocoId 'bottom'
 
 Step '5. AnyDesk (remote desktop client/host)'
-Try-Winget 'AnyDeskSoftwareGmbH.AnyDesk' 'AnyDesk' 'AnyDesk'
+Try-Install -Label 'AnyDesk'             -Probe 'AnyDesk'   -WingetId 'AnyDeskSoftwareGmbH.AnyDesk' -ChocoId 'anydesk.install'
 
 Step '6. jq (CLI JSON pretty-printer)'
-Try-Winget 'jqlang.jq' 'jq' 'jq'
+Try-Install -Label 'jq'                  -Probe 'jq'        -WingetId 'jqlang.jq'                   -ChocoId 'jq'
 
 if ($IncludeRainmeter) {
     Step '7. Rainmeter (desktop widgets)'
-    Try-Winget 'Rainmeter.Rainmeter' 'Rainmeter' 'Rainmeter'
+    Try-Install -Label 'Rainmeter'       -Probe 'Rainmeter' -WingetId 'Rainmeter.Rainmeter'         -ChocoId 'rainmeter'
 } else {
     Info 'Skipping Rainmeter (pass -IncludeRainmeter to include).'
 }
