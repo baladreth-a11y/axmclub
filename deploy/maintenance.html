@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AxMclub.com — Be right back</title>
+  <meta name="robots" content="noindex,nofollow" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg:        #0a0c11;
+      --surface-1: #13171f;
+      --surface-2: #191f2a;
+      --line:      #222838;
+      --text:      #eef1f6;
+      --muted:     #8d96a6;
+      --gold:      #d4af6a;
+      --gold-hi:   #f0cf87;
+      --on-gold:   #1a1408;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; min-height: 100vh; }
+    body {
+      font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(900px 500px at 12% -10%, rgba(124,108,255,0.10), transparent 60%),
+        radial-gradient(800px 500px at 100% 8%, rgba(212,175,106,0.10), transparent 55%),
+        var(--bg);
+      display: grid; place-items: center; padding: 24px;
+      -webkit-font-smoothing: antialiased;
+    }
+    .card {
+      width: min(540px, 100%);
+      background: linear-gradient(180deg, var(--surface-2), var(--surface-1));
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 48px 32px;
+      text-align: center;
+      box-shadow: 0 24px 60px rgba(0,0,0,0.45);
+    }
+    .brand {
+      display: inline-flex; align-items: center; gap: 10px;
+      font-weight: 700; margin-bottom: 24px;
+    }
+    .brand-mark {
+      width: 36px; height: 36px; border-radius: 12px;
+      display: grid; place-items: center;
+      background: linear-gradient(135deg, var(--gold-hi), var(--gold));
+      color: var(--on-gold);
+      font-family: 'Playfair Display', serif; font-weight: 700;
+      box-shadow: 0 8px 20px -8px rgba(212,175,106,0.6);
+    }
+    .brand-name { font-size: 18px; }
+    .brand-name b { color: var(--gold); font-weight: 700; }
+    .eyebrow {
+      display: inline-block;
+      font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase;
+      color: var(--gold); font-weight: 600;
+      margin-bottom: 12px;
+    }
+    h1 {
+      font-family: 'Playfair Display', Georgia, serif;
+      font-size: clamp(28px, 4vw, 40px);
+      line-height: 1.15;
+      margin: 0 0 12px;
+    }
+    p { color: var(--muted); margin: 0 0 12px; line-height: 1.55; }
+    .pulse {
+      display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+      background: var(--gold); margin-right: 8px;
+      animation: pulse 1.4s ease-in-out infinite;
+      vertical-align: middle;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%      { opacity: 0.35; transform: scale(1.4); }
+    }
+    .fine-print {
+      font-size: 12px; color: var(--muted);
+      margin-top: 24px; padding-top: 16px;
+      border-top: 1px solid var(--line);
+    }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <div class="brand">
+      <span class="brand-mark">A</span>
+      <span class="brand-name">AxMclub<b>.com</b></span>
+    </div>
+    <span class="eyebrow"><span class="pulse"></span>Be right back</span>
+    <h1>We're updating the club.</h1>
+    <p>The site is briefly offline for scheduled maintenance.</p>
+    <p>Please check back in a few minutes.</p>
+    <p class="fine-print">If this lasts longer than expected, your member account and balance are safe — nothing is lost.</p>
+  </main>
+</body>
+</html>
