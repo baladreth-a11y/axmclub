@@ -1,28 +1,39 @@
 import { $, $$, tierFor } from './util.js';
 import { store } from './store.js';
 
+// All DOM writes are null-safe: a few of these IDs (#pointsValue, #tierBadge)
+// were moved into the stats widget over the lifetime of the project. Treat
+// any missing element as a no-op rather than letting a TypeError propagate
+// out of the store subscriber and break unrelated UI flows (notably: the
+// auth modal's closeModal() after a successful register).
+function setText(sel, value) {
+  const el = $(sel);
+  if (el) el.textContent = value;
+}
+function setHidden(sel, hidden) {
+  const el = $(sel);
+  if (el) el.classList.toggle('hidden', !!hidden);
+}
+
 function render(state) {
   const user = state.user;
-  const chip = $('#userChip');
-  const loginBtn = $('#openLogin');
-  const registerBtn = $('#openRegister');
 
   if (user) {
-    chip.classList.remove('hidden');
-    loginBtn.classList.add('hidden');
-    registerBtn.classList.add('hidden');
-    $('#userName').textContent = user.name;
-    $('#userInitial').textContent = (user.name[0] || 'U').toUpperCase();
+    setHidden('#userChip',     false);
+    setHidden('#openLogin',    true);
+    setHidden('#openRegister', true);
+    setText('#userName',    user.name);
+    setText('#userInitial', (user.name[0] || 'U').toUpperCase());
   } else {
-    chip.classList.add('hidden');
-    loginBtn.classList.remove('hidden');
-    registerBtn.classList.remove('hidden');
+    setHidden('#userChip',     true);
+    setHidden('#openLogin',    false);
+    setHidden('#openRegister', false);
   }
 
   const points = user ? user.points : 0;
   const tier = user ? (user.tier || tierFor(points)) : null;
-  $('#pointsValue').textContent = points.toLocaleString();
-  $('#tierBadge').textContent = user ? `${tier} tier` : '— Not a member —';
+  setText('#pointsValue', points.toLocaleString());
+  setText('#tierBadge',   user ? `${tier} tier` : '— Not a member —');
 
   const tierKey = (tier || tierFor(points)).toLowerCase();
   for (const el of $$('.tier')) {

@@ -1,4 +1,8 @@
 // Tiny reactive store. `set` accepts a patch object OR an updater fn.
+// Subscribers are isolated: if one throws, the others still run, and the
+// error is logged with an [axm] prefix so it shows up in the global error
+// boundary's console output without breaking the caller (e.g. auth.js's
+// closeModal after register).
 export function createStore(initial) {
   let state = initial;
   const listeners = new Set();
@@ -6,7 +10,10 @@ export function createStore(initial) {
     get() { return state; },
     set(patch) {
       state = typeof patch === 'function' ? patch(state) : { ...state, ...patch };
-      for (const fn of listeners) fn(state);
+      for (const fn of listeners) {
+        try { fn(state); }
+        catch (err) { console.error('[axm] store subscriber failed:', err); }
+      }
     },
     subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); }
   };
