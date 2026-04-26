@@ -177,9 +177,23 @@ Step '8. Schedule nightly db.json backup'
 $taskName = 'AxMclub DB backup'
 $backupScript = Join-Path $InstallPath 'deploy\backup-db.ps1'
 $trArg = ('powershell -NoProfile -ExecutionPolicy Bypass -File "' + $backupScript + '" -InstallPath "' + $InstallPath + '" -BackupDir "' + $BackupDir + '"')
-& schtasks.exe /Delete /TN $taskName /F 2>$null | Out-Null
-& schtasks.exe /Create /TN $taskName /SC DAILY /ST 03:30 /RL HIGHEST /RU SYSTEM /TR $trArg /F | Out-Null
-Ok ("Scheduled nightly backup task: '" + $taskName + "' -> " + $BackupDir)
+# /Create /F overwrites an existing task in place, so the previous /Delete
+# step was redundant -- and on PS 7+ its non-zero exit when the task didn't
+# exist yet was promoted to a terminating error, aborting the bootstrap.
+# Disable native-command error promotion just for this call so a non-zero
+# schtasks exit (e.g. transient ACL issue) is reported as info, not fatal.
+$prevNativeErr = $PSNativeCommandUseErrorActionPreference
+try {
+    if ($null -ne $prevNativeErr) { $PSNativeCommandUseErrorActionPreference = $false }
+    & schtasks.exe /Create /TN $taskName /SC DAILY /ST 03:30 /RL HIGHEST /RU SYSTEM /TR $trArg /F | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Info ("schtasks /Create returned exit code " + $LASTEXITCODE + " -- backup task may not be registered. Run it manually if so.")
+    } else {
+        Ok ("Scheduled nightly backup task: '" + $taskName + "' -> " + $BackupDir)
+    }
+} finally {
+    if ($null -ne $prevNativeErr) { $PSNativeCommandUseErrorActionPreference = $prevNativeErr }
+}
 
 Step '9. Done'
 Write-Host ""
