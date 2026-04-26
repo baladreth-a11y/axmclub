@@ -1328,6 +1328,18 @@
     flex-wrap: wrap; margin: var(--space-5) 0 var(--space-4);
   }
 
+  /* When the auth modal is open, slide the gate's auth card down + fade it
+     out so the user actually sees the create-account / sign-in form. The
+     gate stays mounted (interaction still locked) but visually steps aside.
+     If the user closes the modal without signing in, the gate slides back. */
+  .gate { transition: opacity 220ms var(--ease), transform 240ms var(--ease), backdrop-filter var(--medium), background var(--medium); }
+  body:has(#modalBackdrop:not(.hidden)) #gate {
+    opacity: 0;
+    transform: translateY(24px);
+    pointer-events: none;
+    backdrop-filter: none;
+  }
+
   /* ---- Toast ------------------------------------------------------- */
   .toast {
     position: fixed; bottom: var(--space-6); left: 50%;
