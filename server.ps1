@@ -128,10 +128,13 @@ $Script:CamPassDurationMs = 10 * 60 * 1000       # 10 min
 
 # Cam-room passwords (issued by the model / admin).
 # `usesByUser` tracks per-user one-shot redemptions to prevent spam.
+# `createdBy` records ownership: 'system' for seeded codes, 'admin' for
+# operator-issued codes, or a model's email for model-issued codes. The
+# model dashboard uses this field to filter to a single model's passwords.
 $Script:CamPasswords = @{
-  'MODEL10'    = @{ uses = 5;   note = 'Model of the day';     usesByUser = @{} }
-  'VIP-FAST'   = @{ uses = 10;  note = 'VIP holders';           usesByUser = @{} }
-  'OPEN-HOUSE' = @{ uses = 999; note = 'Open house — everyone'; usesByUser = @{} }
+  'MODEL10'    = @{ uses = 5;   note = 'Model of the day';     usesByUser = @{}; createdBy = 'system' }
+  'VIP-FAST'   = @{ uses = 10;  note = 'VIP holders';           usesByUser = @{}; createdBy = 'system' }
+  'OPEN-HOUSE' = @{ uses = 999; note = 'Open house — everyone'; usesByUser = @{}; createdBy = 'system' }
 }
 
 # Click-to-claim tasks. cooldownMs = 0 means one-time only.
@@ -200,6 +203,16 @@ function Public-User($u) {
   $rank = ''
   if ($u.rank)   { $rank   = [string]$u.rank }
   $level = [int]$u.points + $tokens
+  $bio = ''
+  if ($u.bio) { $bio = [string]$u.bio }
+  $brand = ''
+  if ($u.brandColor) { $brand = [string]$u.brandColor }
+  $socials = @{ telegram = ''; snap = ''; webcam = ''; fansite = '' }
+  if ($u.socials) {
+    foreach ($k in @('telegram','snap','webcam','fansite')) {
+      if ($u.socials[$k]) { $socials[$k] = [string]$u.socials[$k] }
+    }
+  }
   return @{
     name           = $u.name
     email          = $u.email
@@ -214,6 +227,9 @@ function Public-User($u) {
     redemptions    = $redCount
     camPassExpires = $camExp
     accountType    = $acct
+    bio            = $bio
+    brandColor     = $brand
+    socials        = $socials
   }
 }
 
@@ -317,6 +333,21 @@ function Require-Admin($req, $resp) {
     return $false
   }
   return $true
+}
+
+# Returns the logged-in user when their accountType is 'model'. On failure
+# writes a 401 (signed-out) or 403 (signed-in supporter) and returns $null.
+# Used by every /api/model/* handler.
+function Require-Model($req, $resp, $db) {
+  $u = Require-Auth $req $resp $db
+  if (-not $u) { return $null }
+  $acct = ''
+  if ($u.accountType) { $acct = [string]$u.accountType }
+  if ($acct -ne 'model') {
+    Send-Json $resp @{ error = 'Model accounts only.' } 403
+    return $null
+  }
+  return $u
 }
 
 # ---- Auth: register / login / logout / me -------------------------------
@@ -777,8 +808,280 @@ function Handle-Cam($req, $resp, $db, $path, $method) {
         Send-Json $resp @{ error = 'password is required.' } 400
         return $true
       }
-      $Script:CamPasswords[$pw] = @{ uses = $uses; note = $note; usesByUser = @{} }
-      Send-Json $resp @{ ok = $true; password = $pw; uses = $uses; note = $note }
+      $Script:CamPasswords[$pw] = @{ uses = $uses; note = $note; usesByUser = @{}; createdBy = 'admin' }
+      Send-Json $resp @{ ok = $true; password = $pw; uses = $uses; note = $note; createdBy = 'admin' }
+      return $true
+    }
+  }
+  return $false
+}
+
+# ---- Model dashboard: own profile, own passwords, targeted offers ------
+# Every endpoint here requires accountType=='model'. The Require-Model
+# helper writes the right 401/403 and returns $null on failure.
+#
+# Ownership rules:
+#   * Cam passwords carry createdBy = email|'admin'|'system'. A model can
+#     only see / revoke / modify passwords whose createdBy matches their
+#     own email.
+#   * Offers are stored on the supporter who sent them. A model sees an
+#     offer when its `target` matches their display name (case-insensitive).
+#   * Profile fields (bio, brandColor, socials.*) live on the user record
+#     itself and are exposed by Public-User.
+function Handle-Model($req, $resp, $db, $path, $method) {
+  $key = "$method $path"
+  switch ($key) {
+
+    'GET /api/model/profile' {
+      $u = Require-Model $req $resp $db
+      if (-not $u) { return $true }
+      Send-Json $resp @{ user = (Public-User $u) }
+      return $true
+    }
+
+    'POST /api/model/profile' {
+      $u = Require-Model $req $resp $db
+      if (-not $u) { return $true }
+      $body = Read-JsonBody $req
+      $changes = @{}
+      # Display name (1-60 chars). Optional.
+      if ($body.PSObject.Properties['name'] -or $body.ContainsKey('name')) {
+        $newName = ("$($body.name)").Trim()
+        if ($newName -and $newName.Length -le 60) {
+          $u.name = $newName
+          $changes.name = $newName
+        }
+      }
+      # Bio (free text up to 280 chars).
+      if ($body.PSObject.Properties['bio'] -or $body.ContainsKey('bio')) {
+        $newBio = ("$($body.bio)").Trim()
+        if ($newBio.Length -gt 280) { $newBio = $newBio.Substring(0, 280) }
+        $u.bio = $newBio
+        $changes.bio = $newBio
+      }
+      # Brand color (CSS hex like '#7c6cff'). Empty allowed (resets).
+      if ($body.PSObject.Properties['brandColor'] -or $body.ContainsKey('brandColor')) {
+        $newColor = ("$($body.brandColor)").Trim()
+        if ($newColor -eq '' -or ($newColor -match '^#[0-9a-fA-F]{3,8}$')) {
+          $u.brandColor = $newColor
+          $changes.brandColor = $newColor
+        }
+      }
+      # Socials sub-object.
+      if ($body.PSObject.Properties['socials'] -or $body.ContainsKey('socials')) {
+        if (-not $u.socials) { $u.socials = @{} }
+        $s = $body.socials
+        foreach ($k in @('telegram','snap','webcam','fansite')) {
+          if ($s -and ($s.PSObject.Properties[$k] -or $s.ContainsKey($k))) {
+            $val = ("$($s[$k])").Trim()
+            if ($val.Length -le 200) {
+              $u.socials[$k] = $val
+            }
+          }
+        }
+        $changes.socials = $u.socials
+      }
+      if ($changes.Keys.Count -eq 0) {
+        Send-Json $resp @{ error = 'No valid fields to update.' } 400
+        return $true
+      }
+      Save-Db $db
+      Send-Json $resp @{ ok = $true; changes = $changes; user = (Public-User $u) }
+      return $true
+    }
+
+    'GET /api/model/passwords' {
+      $u = Require-Model $req $resp $db
+      if (-not $u) { return $true }
+      $list = @()
+      foreach ($code in $Script:CamPasswords.Keys) {
+        $entry = $Script:CamPasswords[$code]
+        $owner = ''
+        if ($entry.createdBy) { $owner = [string]$entry.createdBy }
+        if ($owner -ne $u.email) { continue }
+        $redeemers = @()
+        if ($entry.usesByUser) { $redeemers = @($entry.usesByUser.Keys) }
+        $list += @{
+          code          = $code
+          uses          = [int]$entry.uses
+          note          = [string]$entry.note
+          createdBy     = $owner
+          redeemedBy    = $redeemers
+          redeemedCount = $redeemers.Count
+        }
+      }
+      Send-Json $resp @{ passwords = @($list); count = @($list).Count }
+      return $true
+    }
+
+    'POST /api/model/passwords' {
+      $u = Require-Model $req $resp $db
+      if (-not $u) { return $true }
+      $body = Read-JsonBody $req
+      $pw = ("$($body.password)").Trim().ToUpper()
+      $uses = 1
+      if ($body.uses) { $uses = [int]$body.uses }
+      if ($uses -lt 1)   { $uses = 1 }
+      if ($uses -gt 999) { $uses = 999 }
+      $note = ("$($body.note)").Trim()
+      if (-not $note) { $note = ('Issued by ' + $u.name) }
+      if ($note.Length -gt 80) { $note = $note.Substring(0, 80) }
+      if (-not $pw -or $pw.Length -lt 2 -or $pw.Length -gt 32) {
+        Send-Json $resp @{ error = 'Password code must be 2-32 chars.' } 400
+        return $true
+      }
+      if ($Script:CamPasswords.ContainsKey($pw)) {
+        Send-Json $resp @{ error = 'That code already exists.' } 409
+        return $true
+      }
+      $Script:CamPasswords[$pw] = @{
+        uses       = $uses
+        note       = $note
+        usesByUser = @{}
+        createdBy  = $u.email
+      }
+      Send-Json $resp @{ ok = $true; password = $pw; uses = $uses; note = $note; createdBy = $u.email }
+      return $true
+    }
+
+    'POST /api/model/passwords/revoke' {
+      $u = Require-Model $req $resp $db
+      if (-not $u) { return $true }
+      $body = Read-JsonBody $req
+      $code = ("$($body.code)").Trim().ToUpper()
+      if (-not $code -or -not $Script:CamPasswords.ContainsKey($code)) {
+        Send-Json $resp @{ error = 'Password not found.' } 404
+        return $true
+      }
+      $entry = $Script:CamPasswords[$code]
+      $owner = ''
+      if ($entry.createdBy) { $owner = [string]$entry.createdBy }
+      if ($owner -ne $u.email) {
+        Send-Json $resp @{ error = 'You can only revoke passwords you created.' } 403
+        return $true
+      }
+      $entry.uses = 0
+      Send-Json $resp @{ ok = $true; code = $code }
+      return $true
+    }
+
+    'GET /api/model/offers' {
+      $u = Require-Model $req $resp $db
+      if (-not $u) { return $true }
+      $myName = ($u.name + '').ToLower()
+      $all = @()
+      foreach ($email in $db.users.Keys) {
+        $sender = $db.users[$email]
+        if (-not $sender.offers) { continue }
+        foreach ($o in @($sender.offers)) {
+          $tgt = ''
+          if ($o.target) { $tgt = [string]$o.target }
+          if ($tgt.ToLower() -ne $myName) { continue }
+          $status = 'pending'
+          if ($o.status) { $status = [string]$o.status }
+          $all += @{
+            id       = [string]$o.id
+            from     = [string]$sender.email
+            fromName = [string]$sender.name
+            target   = $tgt
+            message  = [string]$o.message
+            status   = $status
+            at       = [long]$o.at
+          }
+        }
+      }
+      $all = @($all | Sort-Object -Property { [long]$_.at } -Descending)
+      Send-Json $resp @{ offers = $all; count = $all.Count }
+      return $true
+    }
+
+    'POST /api/model/offers/respond' {
+      $u = Require-Model $req $resp $db
+      if (-not $u) { return $true }
+      $body = Read-JsonBody $req
+      $email   = ("$($body.userEmail)").Trim().ToLower()
+      $offerId = ("$($body.offerId)").Trim()
+      $status  = ("$($body.status)").Trim().ToLower()
+      if (@('accepted','declined') -notcontains $status) {
+        Send-Json $resp @{ error = 'Status must be accepted or declined.' } 400
+        return $true
+      }
+      if (-not $db.users.ContainsKey($email)) {
+        Send-Json $resp @{ error = 'Offer not found.' } 404
+        return $true
+      }
+      $sender = $db.users[$email]
+      if (-not $sender.offers) {
+        Send-Json $resp @{ error = 'Offer not found.' } 404
+        return $true
+      }
+      $myName = ($u.name + '').ToLower()
+      $found = $false
+      foreach ($o in @($sender.offers)) {
+        if ($o.id -ne $offerId) { continue }
+        $tgt = ''
+        if ($o.target) { $tgt = [string]$o.target }
+        if ($tgt.ToLower() -ne $myName) {
+          # Targeted at someone else - models cannot respond on their behalf.
+          Send-Json $resp @{ error = 'This offer is not addressed to you.' } 403
+          return $true
+        }
+        $o.status = $status
+        $found = $true
+        break
+      }
+      if (-not $found) {
+        Send-Json $resp @{ error = 'Offer not found.' } 404
+        return $true
+      }
+      Save-Db $db
+      Send-Json $resp @{ ok = $true; offerId = $offerId; status = $status }
+      return $true
+    }
+
+    'GET /api/model/stats' {
+      $u = Require-Model $req $resp $db
+      if (-not $u) { return $true }
+      $passwordsIssued = 0
+      $passwordsActive = 0
+      $totalRedemptions = 0
+      foreach ($code in $Script:CamPasswords.Keys) {
+        $entry = $Script:CamPasswords[$code]
+        $owner = ''
+        if ($entry.createdBy) { $owner = [string]$entry.createdBy }
+        if ($owner -ne $u.email) { continue }
+        $passwordsIssued += 1
+        if ([int]$entry.uses -gt 0) { $passwordsActive += 1 }
+        if ($entry.usesByUser) { $totalRedemptions += @($entry.usesByUser.Keys).Count }
+      }
+      $myName = ($u.name + '').ToLower()
+      $offersTotal = 0; $offersPending = 0; $offersAccepted = 0; $offersDeclined = 0
+      foreach ($email in $db.users.Keys) {
+        $sender = $db.users[$email]
+        if (-not $sender.offers) { continue }
+        foreach ($o in @($sender.offers)) {
+          $tgt = ''
+          if ($o.target) { $tgt = [string]$o.target }
+          if ($tgt.ToLower() -ne $myName) { continue }
+          $offersTotal += 1
+          $st = 'pending'
+          if ($o.status) { $st = [string]$o.status }
+          switch ($st) {
+            'accepted' { $offersAccepted += 1 }
+            'declined' { $offersDeclined += 1 }
+            default    { $offersPending  += 1 }
+          }
+        }
+      }
+      Send-Json $resp @{
+        passwordsIssued  = $passwordsIssued
+        passwordsActive  = $passwordsActive
+        totalRedemptions = $totalRedemptions
+        offersTotal      = $offersTotal
+        offersPending    = $offersPending
+        offersAccepted   = $offersAccepted
+        offersDeclined   = $offersDeclined
+      }
       return $true
     }
   }
@@ -797,10 +1100,13 @@ function Handle-Admin($req, $resp, $db, $path, $method) {
         $entry = $Script:CamPasswords[$code]
         $redeemers = @()
         if ($entry.usesByUser) { $redeemers = @($entry.usesByUser.Keys) }
+        $owner = 'system'
+        if ($entry.createdBy) { $owner = [string]$entry.createdBy }
         $list += @{
           code          = $code
           uses          = [int]$entry.uses
           note          = [string]$entry.note
+          createdBy     = $owner
           redeemedBy    = $redeemers
           redeemedCount = $redeemers.Count
         }
@@ -1112,6 +1418,7 @@ function Handle-Api($req, $resp, $path, $method) {
   if (Handle-Cam       $req $resp $db $path $method) { return }
   if (Handle-Tasks     $req $resp $db $path $method) { return }
   if (Handle-Community $req $resp $db $path $method) { return }
+  if (Handle-Model     $req $resp $db $path $method) { return }
   if (Handle-Admin     $req $resp $db $path $method) { return }
   Send-Json $resp @{ error = 'Not found.' } 404
 }

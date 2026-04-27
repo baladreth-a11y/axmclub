@@ -57,9 +57,13 @@ Log ('Test dir: ' + $TestDir)
 # Copy project into an isolated temp directory so it has a fresh data/ folder.
 New-Item -ItemType Directory -Path $TestDir -Force | Out-Null
 Copy-Item (Join-Path $Root 'server.ps1') (Join-Path $TestDir 'server.ps1')
-Copy-Item (Join-Path $Root 'index.html') (Join-Path $TestDir 'index.html') -ErrorAction SilentlyContinue
 Copy-Item (Join-Path $Root 'styles.css') (Join-Path $TestDir 'styles.css') -ErrorAction SilentlyContinue
 Copy-Item -Recurse (Join-Path $Root 'js') (Join-Path $TestDir 'js') -ErrorAction SilentlyContinue
+# Copy every top-level *.html file so the new dedicated pages
+# (model.html, play.html, cam.html, marketplace.html, supporters.html,
+# players.html, admin.html plus index.html) are all present.
+Get-ChildItem -Path $Root -Filter '*.html' -File |
+    ForEach-Object { Copy-Item $_.FullName (Join-Path $TestDir $_.Name) -ErrorAction SilentlyContinue }
 
 $serverScript = Join-Path $TestDir 'server.ps1'
 $outLog       = Join-Path $TestDir 'out.log'
@@ -526,6 +530,142 @@ try {
     $reread = Invoke-RestMethod -Uri ($Base + '/api/admin/offers') -Headers $adminHead2
     $refreshed = @($reread.offers) | Where-Object { $_.id -eq $firstOffer.id } | Select-Object -First 1
     Check 'Offer status persists as accepted' ($refreshed.status -eq 'accepted')
+
+    Section '19. Multi-page static files'
+    foreach ($page in @('model.html','play.html','cam.html','marketplace.html','supporters.html','players.html')) {
+        $resp = Invoke-WebRequest -Uri ($Base + '/' + $page) -UseBasicParsing
+        Check ("GET /$page returns 200") ($resp.StatusCode -eq 200)
+        # Headers['Content-Type'] can be a string or string[] depending on the
+        # PowerShell host; normalize with @() + -join '' before regex matching.
+        $ct = ((@($resp.Headers['Content-Type'])) -join '')
+        Check ("GET /$page is HTML")     ([bool]($ct -match 'text/html'))
+    }
+    $modelHtml = (Invoke-WebRequest -Uri ($Base + '/model.html') -UseBasicParsing).Content
+    Check 'model.html has profile form'           ($modelHtml -match 'id="profileForm"')
+    Check 'model.html has password manager form'  ($modelHtml -match 'id="newPasswordForm"')
+    Check 'model.html has offers body'            ($modelHtml -match 'id="offersBody"')
+    Check 'model.html has stats hooks'            ($modelHtml -match 'id="statPwIssued"')
+    $camHtml = (Invoke-WebRequest -Uri ($Base + '/cam.html') -UseBasicParsing).Content
+    Check 'cam.html has #camroom section'         ($camHtml -match 'id="camroom"')
+    Check 'cam.html has navHost placeholder'      ($camHtml -match 'id="navHost"')
+    $playHtml = (Invoke-WebRequest -Uri ($Base + '/play.html') -UseBasicParsing).Content
+    Check 'play.html has #tasks section'          ($playHtml -match 'id="tasks"')
+    Check 'play.html has #roulette section'       ($playHtml -match 'id="roulette"')
+    Check 'GET /js/layout.js returns 200'         ((Invoke-WebRequest -Uri ($Base + '/js/layout.js') -UseBasicParsing).StatusCode -eq 200)
+    Check 'GET /js/model-dashboard.js returns 200' ((Invoke-WebRequest -Uri ($Base + '/js/model-dashboard.js') -UseBasicParsing).StatusCode -eq 200)
+
+    Check 'GET / has Model dashboard nav link'    ($html.Content -match 'id="navModelLink"')
+
+    Section '20. Model dashboard API'
+    # Anonymous (no session) is 401 on every model endpoint.
+    foreach ($call in @(
+        @{ method='GET';  url='/api/model/profile' },
+        @{ method='GET';  url='/api/model/passwords' },
+        @{ method='GET';  url='/api/model/offers' },
+        @{ method='GET';  url='/api/model/stats' }
+    )) {
+        $code = 0
+        try {
+            $null = Invoke-RestMethod -Uri ($Base + $call.url) -Method $call.method
+        } catch { $code = StatusCodeOf $_ }
+        Check ('Anonymous ' + $call.method + ' ' + $call.url + ' returns 401') ($code -eq 401) ('got ' + $code)
+    }
+
+    # A signed-in supporter is 403 on every model endpoint.
+    $supSess = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+    $null = Invoke-RestMethod -Uri ($Base + '/api/register') -Method Post -ContentType 'application/json' -WebSession $supSess `
+        -Body (JsonBody @{ name='Sara'; email='sara@example.com'; password='abcd' })
+    $supCode = 0
+    try { $null = Invoke-RestMethod -Uri ($Base + '/api/model/profile') -WebSession $supSess } catch { $supCode = StatusCodeOf $_ }
+    Check 'Supporter GET /api/model/profile returns 403' ($supCode -eq 403) ('got ' + $supCode)
+
+    # Promote a user to model via the admin endpoint.
+    $modelSess = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+    $null = Invoke-RestMethod -Uri ($Base + '/api/register') -Method Post -ContentType 'application/json' -WebSession $modelSess `
+        -Body (JsonBody @{ name='Nova'; email='nova@example.com'; password='abcd' })
+    $promoted = Invoke-RestMethod -Uri ($Base + '/api/admin/users/adjust') -Method Post -ContentType 'application/json' -Headers $adminHead -Body (JsonBody @{ email='nova@example.com'; accountType='model' })
+    Check 'Promotion to model succeeds' ($promoted.user.accountType -eq 'model') ('got ' + $promoted.user.accountType)
+
+    # The model session needs to refresh /api/me after the admin promoted them.
+    $modelMe = Invoke-RestMethod -Uri ($Base + '/api/me') -WebSession $modelSess
+    Check 'Promoted user reads as model on /api/me' ($modelMe.user.accountType -eq 'model') ('got ' + $modelMe.user.accountType)
+
+    # Profile read.
+    $prof = Invoke-RestMethod -Uri ($Base + '/api/model/profile') -WebSession $modelSess
+    Check 'Model can read own profile'        ($prof.user.email -eq 'nova@example.com')
+    Check 'Profile defaults bio to empty'     ($prof.user.bio -eq '' -or $null -eq $prof.user.bio)
+
+    # Profile update.
+    $upd = Invoke-RestMethod -Uri ($Base + '/api/model/profile') -Method Post -ContentType 'application/json' -WebSession $modelSess `
+        -Body (JsonBody @{ bio='Friday nights, jazz + synth.'; brandColor='#ff66aa'; socials=@{ telegram='https://t.me/nova_demo' } })
+    Check 'Profile update returns ok'           ($upd.ok -eq $true)
+    Check 'Bio persists in user payload'        ($upd.user.bio -eq 'Friday nights, jazz + synth.')
+    Check 'Brand color persists'                ($upd.user.brandColor -eq '#ff66aa')
+    Check 'Telegram social persists'            ($upd.user.socials.telegram -eq 'https://t.me/nova_demo')
+
+    # Bad brand color is rejected.
+    $badProf = 0
+    try {
+        $null = Invoke-RestMethod -Uri ($Base + '/api/model/profile') -Method Post -ContentType 'application/json' -WebSession $modelSess -Body (JsonBody @{ brandColor='not-a-color' })
+    } catch { $badProf = StatusCodeOf $_ }
+    Check 'Empty profile body returns 400 (bad color rejected)' ($badProf -eq 400) ('got ' + $badProf)
+
+    # Create a model-owned password.
+    $createdPw = Invoke-RestMethod -Uri ($Base + '/api/model/passwords') -Method Post -ContentType 'application/json' -WebSession $modelSess `
+        -Body (JsonBody @{ password='nova-vip'; uses=3; note='VIPs only' })
+    Check 'Model can create a password'         ($createdPw.ok -eq $true)
+    Check 'Created password is uppercase'        ($createdPw.password -eq 'NOVA-VIP')
+    Check 'createdBy stamped with model email'   ($createdPw.createdBy -eq 'nova@example.com')
+
+    # Listing model passwords excludes system + admin codes.
+    $myPw = Invoke-RestMethod -Uri ($Base + '/api/model/passwords') -WebSession $modelSess
+    $myCodes = ''
+    foreach ($p in @($myPw.passwords)) { $myCodes = $myCodes + ',' + $p.code }
+    Check 'Model password list contains NOVA-VIP'   ($myCodes -match 'NOVA-VIP')
+    Check 'Model password list excludes MODEL10'    ($myCodes -notmatch 'MODEL10')
+    Check 'Model password list excludes OPEN-HOUSE' ($myCodes -notmatch 'OPEN-HOUSE')
+
+    # Duplicate code rejected.
+    $dupModel = 0
+    try {
+        $null = Invoke-RestMethod -Uri ($Base + '/api/model/passwords') -Method Post -ContentType 'application/json' -WebSession $modelSess -Body (JsonBody @{ password='nova-vip'; uses=1 })
+    } catch { $dupModel = StatusCodeOf $_ }
+    Check 'Duplicate password code returns 409' ($dupModel -eq 409) ('got ' + $dupModel)
+
+    # Revoke someone else's password (system-seeded MODEL10) -> 403.
+    $stealCode = 0
+    try {
+        $null = Invoke-RestMethod -Uri ($Base + '/api/model/passwords/revoke') -Method Post -ContentType 'application/json' -WebSession $modelSess -Body (JsonBody @{ code='MODEL10' })
+    } catch { $stealCode = StatusCodeOf $_ }
+    Check 'Model revoking someone else password returns 403' ($stealCode -eq 403) ('got ' + $stealCode)
+
+    # Revoke own password.
+    $revOwn = Invoke-RestMethod -Uri ($Base + '/api/model/passwords/revoke') -Method Post -ContentType 'application/json' -WebSession $modelSess -Body (JsonBody @{ code='NOVA-VIP' })
+    Check 'Model can revoke own password' ($revOwn.ok -eq $true)
+
+    # Offers: ensure the offer Alice sent earlier in section 16 (target='Nova')
+    # appears in the model's targeted-offers feed.
+    $myOffers = Invoke-RestMethod -Uri ($Base + '/api/model/offers') -WebSession $modelSess
+    Check 'Model sees at least one targeted offer' (@($myOffers.offers).Count -ge 1) ('got ' + @($myOffers.offers).Count)
+    $myOffer = @($myOffers.offers)[0]
+    Check 'Offer is addressed to Nova' ($myOffer.target -eq 'Nova') ('got ' + $myOffer.target)
+
+    # Bad status rejected.
+    $badResp = 0
+    try {
+        $null = Invoke-RestMethod -Uri ($Base + '/api/model/offers/respond') -Method Post -ContentType 'application/json' -WebSession $modelSess -Body (JsonBody @{ userEmail=$myOffer.from; offerId=$myOffer.id; status='nope' })
+    } catch { $badResp = StatusCodeOf $_ }
+    Check 'Invalid model offer status returns 400' ($badResp -eq 400) ('got ' + $badResp)
+
+    # Decline own targeted offer.
+    $declined = Invoke-RestMethod -Uri ($Base + '/api/model/offers/respond') -Method Post -ContentType 'application/json' -WebSession $modelSess -Body (JsonBody @{ userEmail=$myOffer.from; offerId=$myOffer.id; status='declined' })
+    Check 'Model can decline targeted offer' ($declined.status -eq 'declined')
+
+    # Stats reflect issued + redeemed counts.
+    $modelStats = Invoke-RestMethod -Uri ($Base + '/api/model/stats') -WebSession $modelSess
+    Check 'Stats: passwordsIssued >= 1'  ($modelStats.passwordsIssued -ge 1) ('got ' + $modelStats.passwordsIssued)
+    Check 'Stats: offersTotal >= 1'      ($modelStats.offersTotal     -ge 1) ('got ' + $modelStats.offersTotal)
+    Check 'Stats: offersDeclined >= 1'   ($modelStats.offersDeclined  -ge 1) ('got ' + $modelStats.offersDeclined)
 
     Section '13. Streak + spin history'
     $aliceMe = Invoke-RestMethod -Uri ($Base + '/api/me') -WebSession $aliceSession

@@ -40,5 +40,16 @@ export const api = {
   claimTask:         taskId => request('/api/tasks/claim', { method: 'POST', body: { taskId } }),
 
   buyTokens:         amount => request('/api/tokens/buy', { method: 'POST', body: { amount } }),
-  makeOffer:         body   => request('/api/offer',      { method: 'POST', body })
+  makeOffer:         body   => request('/api/offer',      { method: 'POST', body }),
+
+  // Model dashboard. Each requires the caller to be signed in with
+  // accountType == 'model' (server enforces with Require-Model).
+  modelProfile:        () => request('/api/model/profile'),
+  modelUpdateProfile:  body => request('/api/model/profile',  { method: 'POST', body }),
+  modelPasswords:      () => request('/api/model/passwords'),
+  modelCreatePassword: body => request('/api/model/passwords', { method: 'POST', body }),
+  modelRevokePassword: code => request('/api/model/passwords/revoke', { method: 'POST', body: { code } }),
+  modelOffers:         () => request('/api/model/offers'),
+  modelRespondOffer:   body => request('/api/model/offers/respond', { method: 'POST', body }),
+  modelStats:          () => request('/api/model/stats')
 };

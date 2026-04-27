@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cam Room — AxMclub.com</title>
+  <meta name="description" content="The members-only cam room with timed pass." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="is-gated is-age-gated">
+  <header id="navHost"></header>
+  <div id="gateHost"></div>
+
+  <section id="camroom" class="section section-alt">
+    <div class="container">
+      <div class="section-head center">
+        <span class="eyebrow">Members only</span>
+        <h2>Cam room</h2>
+        <p class="muted" id="camHint">Enter a model-issued code, redeem 1,500 pts in the catalog, or earn enough points from daily tasks.</p>
+      </div>
+
+      <div class="cam-card">
+        <div id="camLocked" class="cam-state">
+          <div class="cam-stage cam-stage-locked" aria-hidden="true">
+            <div class="cam-stage-overlay">
+              <span class="cam-lock-icon">▶</span>
+              <p class="cam-stage-title">Stream locked</p>
+              <p class="cam-stage-sub">Unlock a 10-minute pass to enter.</p>
+            </div>
+          </div>
+          <form id="camPasswordForm" class="cam-password-form">
+            <label class="sr-only" for="camPasswordInput">Password</label>
+            <input id="camPasswordInput" type="text" placeholder="Enter pass code (e.g. MODEL10)" autocomplete="off" spellcheck="false" />
+            <button type="submit" class="btn btn-primary">Enter code</button>
+          </form>
+          <p class="fine-print">Tip: stack Gold-tier bonuses and daily tasks to afford the 1,500-pt pass.</p>
+        </div>
+        <div id="camLive" class="cam-state hidden">
+          <div class="cam-stage cam-stage-live" aria-hidden="true">
+            <div class="cam-live-indicator"><span class="pulse"></span>LIVE</div>
+            <div class="cam-stage-overlay">
+              <p class="cam-stage-title">Stream placeholder</p>
+              <p class="cam-stage-sub">Your pass is active. Hook this up to your WebRTC/HLS provider.</p>
+            </div>
+          </div>
+          <div class="cam-live-footer">
+            <span class="cam-countdown-label">Time left</span>
+            <span id="camCountdown" class="cam-countdown">10:00</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div id="modalHost"></div>
+  <footer id="footerHost"></footer>
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+
+  <script type="module">
+    import { api } from './js/api.js';
+    import { store } from './js/store.js';
+    import { initSharedLayout } from './js/layout.js';
+    import { initCamroom } from './js/camroom.js';
+
+    initSharedLayout({ activePage: 'cam' });
+    initCamroom();
+    api.me().then(({ user }) => store.set({ user })).catch(() => {});
+  </script>
+</body>
+</html>

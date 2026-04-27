@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Marketplace — AxMclub.com</title>
+  <meta name="description" content="Spend points on members-only perks." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="is-gated is-age-gated">
+  <header id="navHost"></header>
+  <div id="gateHost"></div>
+
+  <section id="marketplace" class="section">
+    <div class="container">
+      <div class="section-head">
+        <span class="eyebrow">Spend your points</span>
+        <h2>Marketplace</h2>
+        <p class="muted">Exchange points for exclusive perks. New drops every month.</p>
+      </div>
+      <div id="catalogGrid" class="catalog-grid">
+        <p class="lb-empty">Loading…</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="rewards" class="section section-alt">
+    <div class="container">
+      <div class="section-head">
+        <span class="eyebrow">Rewards program</span>
+        <h2>Every spin moves you forward</h2>
+      </div>
+      <div class="tier-grid">
+        <div class="tier" data-tier="silver">
+          <h3>Silver</h3>
+          <p class="tier-range">0 – 499 pts</p>
+          <ul>
+            <li>Daily spin access</li>
+            <li>Member newsletter</li>
+          </ul>
+        </div>
+        <div class="tier tier-highlight" data-tier="gold">
+          <h3>Gold</h3>
+          <p class="tier-range">500 – 1,499 pts</p>
+          <ul>
+            <li>+15% spin bonus</li>
+            <li>Early access drops</li>
+            <li>Priority support</li>
+          </ul>
+        </div>
+        <div class="tier" data-tier="platinum">
+          <h3>Platinum</h3>
+          <p class="tier-range">1,500+ pts</p>
+          <ul>
+            <li>+30% spin bonus</li>
+            <li>Monthly gift</li>
+            <li>Concierge perks</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div id="modalHost"></div>
+  <footer id="footerHost"></footer>
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+
+  <script type="module">
+    import { api } from './js/api.js';
+    import { store } from './js/store.js';
+    import { initSharedLayout } from './js/layout.js';
+    import { initRewards, refreshRewards } from './js/rewards.js';
+
+    initSharedLayout({ activePage: 'marketplace' });
+    initRewards();
+    api.me().then(({ user }) => store.set({ user })).catch(() => {});
+    refreshRewards();
+  </script>
+</body>
+</html>

@@ -13,9 +13,10 @@ function Code($ex) { try { [int]$ex.Exception.Response.StatusCode.Value__ } catc
 
 New-Item -ItemType Directory -Path $TestDir -Force | Out-Null
 Copy-Item (Join-Path $Root 'server.ps1') (Join-Path $TestDir 'server.ps1')
-Copy-Item (Join-Path $Root 'index.html') (Join-Path $TestDir 'index.html')
 Copy-Item (Join-Path $Root 'styles.css') (Join-Path $TestDir 'styles.css')
 Copy-Item -Recurse (Join-Path $Root 'js') (Join-Path $TestDir 'js')
+Get-ChildItem -Path $Root -Filter '*.html' -File |
+    ForEach-Object { Copy-Item $_.FullName (Join-Path $TestDir $_.Name) -ErrorAction SilentlyContinue }
 
 $sp = Start-Process powershell -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $TestDir 'server.ps1'),'-Port',$Port -PassThru -WindowStyle Hidden `
   -RedirectStandardOutput (Join-Path $TestDir 'out.log') -RedirectStandardError (Join-Path $TestDir 'err.log')

@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Play — AxMclub.com</title>
+  <meta name="description" content="Daily tasks and the roulette spin." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="is-gated is-age-gated">
+  <header id="navHost"></header>
+  <div id="gateHost"></div>
+
+  <section id="tasks" class="section">
+    <div class="container">
+      <div class="section-head">
+        <span class="eyebrow">Earn more</span>
+        <h2>Daily tasks</h2>
+        <p class="muted">Click to claim. Some are one-time, others reset daily or weekly.</p>
+      </div>
+      <div id="tasksGrid" class="tasks-grid">
+        <p class="lb-empty">Loading…</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="roulette" class="section section-alt">
+    <div class="container roulette-wrap">
+      <div class="section-head center">
+        <span class="eyebrow">Members only</span>
+        <h2>The Daily Spin</h2>
+        <p class="muted">Sign in to claim your spin. Resets every 24 hours.</p>
+      </div>
+      <div class="roulette">
+        <div class="wheel-shell">
+          <div class="wheel-pointer" aria-hidden="true"></div>
+          <canvas id="wheel" width="420" height="420" aria-label="Roulette wheel"></canvas>
+          <button id="spinBtn" class="spin-hub">SPIN</button>
+        </div>
+        <div class="roulette-side">
+          <div class="balance-card">
+            <span class="label">Your balance</span>
+            <div class="balance-value"><span id="pointsValue">0</span><small>pts</small></div>
+            <span class="badge badge-gold" id="tierBadge">— Not a member —</span>
+          </div>
+          <div class="last-result" id="lastResult">Sign in and press SPIN to try your luck.</div>
+          <p class="fine-print">Rewards are virtual points used inside AxMclub.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div id="modalHost"></div>
+  <footer id="footerHost"></footer>
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+
+  <script type="module">
+    import { api } from './js/api.js';
+    import { store } from './js/store.js';
+    import { initSharedLayout } from './js/layout.js';
+    import { initWheel } from './js/wheel.js';
+    import { initTasks, refreshTasks } from './js/tasks.js';
+
+    initSharedLayout({ activePage: 'play' });
+    initWheel();
+    initTasks();
+
+    // Hydrate user + initial task list.
+    api.me().then(({ user }) => store.set({ user })).catch(() => {});
+    refreshTasks();
+  </script>
+</body>
+</html>

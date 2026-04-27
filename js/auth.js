@@ -9,7 +9,10 @@ async function doLogout() {
   try { await api.logout(); } catch { /* ignore */ }
   store.set({ user: null });
   closeModal();
-  $('#lastResult').textContent = 'Sign in and press SPIN to try your luck.';
+  // #lastResult lives on the roulette section. Pages that don't render
+  // the wheel (cam, marketplace, model dashboard, ...) won't have it.
+  const lr = $('#lastResult');
+  if (lr) lr.textContent = 'Sign in and press SPIN to try your luck.';
   refreshLeaderboard();
   toast('Signed out.');
 }
@@ -22,7 +25,18 @@ async function refreshStats() {
 }
 
 export function initAuth() {
-  $('#registerForm').addEventListener('submit', async e => {
+  // Many of these elements only exist if the page mounted the modal +
+  // navbar partials. Guard each binding so we can call initAuth() from
+  // any page.
+  const onSubmit = (sel, handler) => {
+    const el = $(sel);
+    if (el) el.addEventListener('submit', handler);
+  };
+  const onClick = (sel, handler) => {
+    const el = $(sel);
+    if (el) el.addEventListener('click', handler);
+  };
+  onSubmit('#registerForm', async e => {
     e.preventDefault();
     const fd = new FormData(e.target);
     try {
@@ -40,7 +54,7 @@ export function initAuth() {
     } catch (err) { toast(err.message, 'error'); }
   });
 
-  $('#loginForm').addEventListener('submit', async e => {
+  onSubmit('#loginForm', async e => {
     e.preventDefault();
     const fd = new FormData(e.target);
     try {
@@ -55,11 +69,11 @@ export function initAuth() {
     } catch (err) { toast(err.message, 'error'); }
   });
 
-  $('#openLogin').addEventListener('click', () => openModal('login'));
-  $('#openRegister').addEventListener('click', () => openModal('register'));
-  $('#openProfile').addEventListener('click', () => {
+  onClick('#openLogin',     () => openModal('login'));
+  onClick('#openRegister',  () => openModal('register'));
+  onClick('#openProfile',   () => {
     if (store.get().user) openModal('profile');
   });
-  $('#logoutBtn').addEventListener('click', doLogout);
-  $('#profileLogout').addEventListener('click', doLogout);
+  onClick('#logoutBtn',     doLogout);
+  onClick('#profileLogout', doLogout);
 }

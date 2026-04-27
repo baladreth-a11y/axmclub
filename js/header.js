@@ -30,6 +30,12 @@ function render(state) {
     setHidden('#openRegister', false);
   }
 
+  // "Model dashboard" nav link is hidden by default and revealed only when
+  // the signed-in user has accountType == 'model'. Server enforces the same
+  // rule on every /api/model/* call.
+  const showModelLink = !!user && user.accountType === 'model';
+  setHidden('#navModelLink', !showModelLink);
+
   const points = user ? user.points : 0;
   const tier = user ? (user.tier || tierFor(points)) : null;
   setText('#pointsValue', points.toLocaleString());

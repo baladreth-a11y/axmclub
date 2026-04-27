@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Supporters — AxMclub.com</title>
+  <meta name="description" content="Top supporters and the upcoming party roster." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="is-gated is-age-gated">
+  <header id="navHost"></header>
+  <div id="gateHost"></div>
+
+  <section id="supporters" class="section section-alt">
+    <div class="container">
+      <div class="section-head">
+        <span class="eyebrow">Hall of fame</span>
+        <h2>Top Supporters</h2>
+        <p class="muted">The members keeping the lights on. Climb the list by spinning and claiming.</p>
+      </div>
+      <div class="leaderboard-card">
+        <div class="leaderboard-head">
+          <span class="lb-col lb-rank">#</span>
+          <span class="lb-col lb-name">Member</span>
+          <span class="lb-col lb-tier">Tier</span>
+          <span class="lb-col lb-points">Points</span>
+        </div>
+        <ol id="leaderboardList" class="leaderboard-list">
+          <li class="lb-empty">Loading…</li>
+        </ol>
+      </div>
+    </div>
+  </section>
+
+  <section id="party-roster" class="section">
+    <div class="container">
+      <div class="section-head">
+        <span class="eyebrow">What's on</span>
+        <h2>AxM Party Roster</h2>
+        <p class="muted">Upcoming members-only parties, hosts and streams.</p>
+      </div>
+      <ol class="party-list">
+        <li class="party-row">
+          <time class="party-date"><b>Fri</b><span>Dec 12</span></time>
+          <div class="party-main">
+            <h3>Winter Lights</h3>
+            <p class="muted">Hosted by Nova · cam-room after-party</p>
+          </div>
+          <span class="badge badge-gold">Gold+</span>
+        </li>
+        <li class="party-row">
+          <time class="party-date"><b>Sat</b><span>Dec 20</span></time>
+          <div class="party-main">
+            <h3>Late-night Salon</h3>
+            <p class="muted">Hosted by Nyx · streams until 02:00</p>
+          </div>
+          <span class="badge badge-accent">Platinum</span>
+        </li>
+        <li class="party-row">
+          <time class="party-date"><b>Sun</b><span>Jan 04</span></time>
+          <div class="party-main">
+            <h3>Sunday Brunch Live</h3>
+            <p class="muted">Hosted by Lux · open mic segment</p>
+          </div>
+          <span class="badge badge-muted">All members</span>
+        </li>
+        <li class="party-row">
+          <time class="party-date"><b>Wed</b><span>Jan 14</span></time>
+          <div class="party-main">
+            <h3>Resident Q&amp;A</h3>
+            <p class="muted">Hosted by Iris · member questions</p>
+          </div>
+          <span class="badge badge-muted">All members</span>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <div id="modalHost"></div>
+  <footer id="footerHost"></footer>
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+
+  <script type="module">
+    import { api } from './js/api.js';
+    import { store } from './js/store.js';
+    import { initSharedLayout } from './js/layout.js';
+    import { initLeaderboard, refreshLeaderboard } from './js/leaderboard.js';
+
+    initSharedLayout({ activePage: 'supporters' });
+    initLeaderboard();
+    api.me().then(({ user }) => store.set({ user })).catch(() => {});
+    refreshLeaderboard();
+  </script>
+</body>
+</html>

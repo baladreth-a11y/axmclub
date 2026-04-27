@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Players — AxMclub.com</title>
+  <meta name="description" content="The roster of AxMcamPlayers — connect on Telegram, Snap, webcam." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="is-gated is-age-gated">
+  <header id="navHost"></header>
+  <div id="gateHost"></div>
+
+  <section class="profiles-banner" aria-labelledby="profilesBannerTitle">
+    <div class="container profiles-banner-inner">
+      <span class="eyebrow">Featured</span>
+      <h2 id="profilesBannerTitle" class="profiles-banner-title">AxM<span class="brand-accent">cam</span>Players</h2>
+      <p class="muted">The roster behind the club — connect directly on Telegram, Snap or their webcam channel.</p>
+    </div>
+  </section>
+
+  <section id="players" class="section players-section">
+    <div class="container">
+      <div class="players-grid">
+
+        <article class="player-card">
+          <a class="player-photo player-photo-1" href="#player-nova" aria-label="View Nova">
+            <span class="player-initial">N</span>
+            <span class="player-status"><span class="pulse"></span>LIVE</span>
+          </a>
+          <div class="player-body">
+            <header class="player-head">
+              <h3>Nova</h3>
+              <span class="badge badge-gold">Headliner</span>
+            </header>
+            <p class="muted">Fridays, 21:00 — jazz + synthwave sets.</p>
+            <div class="player-links">
+              <div class="player-linkgroup">
+                <span class="group-label">Social</span>
+                <div class="group-links">
+                  <a href="https://t.me/" data-kind="telegram">Telegram</a>
+                  <a href="#" data-kind="snap">Snap</a>
+                </div>
+              </div>
+              <div class="player-linkgroup">
+                <span class="group-label">Content</span>
+                <div class="group-links">
+                  <a href="/cam.html" data-kind="webcam">Webcam</a>
+                  <a href="#" data-kind="fansite">Fansite</a>
+                </div>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="player-card">
+          <a class="player-photo player-photo-2" href="#player-lux" aria-label="View Lux">
+            <span class="player-initial">L</span>
+          </a>
+          <div class="player-body">
+            <header class="player-head">
+              <h3>Lux</h3>
+              <span class="badge badge-accent">Host</span>
+            </header>
+            <p class="muted">Warm-up host. Sunday brunch streams.</p>
+            <div class="player-links">
+              <div class="player-linkgroup">
+                <span class="group-label">Social</span>
+                <div class="group-links">
+                  <a href="https://t.me/" data-kind="telegram">Telegram</a>
+                  <a href="#" data-kind="snap">Snap</a>
+                </div>
+              </div>
+              <div class="player-linkgroup">
+                <span class="group-label">Content</span>
+                <div class="group-links">
+                  <a href="/cam.html" data-kind="webcam">Webcam</a>
+                  <a href="#" data-kind="fansite">Fansite</a>
+                </div>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="player-card">
+          <a class="player-photo player-photo-3" href="#player-vega" aria-label="View Vega">
+            <span class="player-initial">V</span>
+          </a>
+          <div class="player-body">
+            <header class="player-head">
+              <h3>Vega</h3>
+              <span class="badge badge-muted">DJ</span>
+            </header>
+            <p class="muted">Deep house, irregular drops.</p>
+            <div class="player-links">
+              <div class="player-linkgroup">
+                <span class="group-label">Social</span>
+                <div class="group-links">
+                  <a href="https://t.me/" data-kind="telegram">Telegram</a>
+                  <a href="#" data-kind="snap">Snap</a>
+                </div>
+              </div>
+              <div class="player-linkgroup">
+                <span class="group-label">Content</span>
+                <div class="group-links">
+                  <a href="/cam.html" data-kind="webcam">Webcam</a>
+                  <a href="#" data-kind="fansite">Fansite</a>
+                </div>
+              </div>
+            </div>
+          </div>
+        </article>
+
+      </div>
+    </div>
+  </section>
+
+  <div id="modalHost"></div>
+  <footer id="footerHost"></footer>
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+
+  <script type="module">
+    import { api } from './js/api.js';
+    import { store } from './js/store.js';
+    import { initSharedLayout } from './js/layout.js';
+
+    initSharedLayout({ activePage: 'players' });
+    api.me().then(({ user }) => store.set({ user })).catch(() => {});
+  </script>
+</body>
+</html>

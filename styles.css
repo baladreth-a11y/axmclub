@@ -1373,6 +1373,145 @@
 }
 
 /* ==========================================================================
+   MODEL DASHBOARD (model.html)
+   ========================================================================== */
+@layer components {
+  /* Page chrome ------------------------------------------------------- */
+  .dash-section { padding: var(--space-7) 0 var(--space-9); }
+  .dash-head    { margin-bottom: var(--space-6); }
+  .dash-head h1 { margin-bottom: var(--space-2); }
+
+  /* 12-col grid; "wide" cards span the full row, default cards span ~1/3 */
+  .dash-grid {
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    gap: var(--space-5);
+  }
+  .dash-card {
+    grid-column: span 4;
+    background: linear-gradient(180deg, var(--surface-2), var(--surface-1));
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    padding: var(--space-5);
+  }
+  .dash-card-wide { grid-column: span 12; }
+  .dash-card h2   { margin: 0 0 var(--space-3); font-size: 22px; }
+
+  /* Forms ------------------------------------------------------------- */
+  .dash-form        { display: grid; gap: var(--space-3); }
+  .dash-form label  {
+    display: grid; gap: 6px; font-size: 13px; color: var(--muted);
+  }
+  .dash-form input,
+  .dash-form textarea {
+    background: var(--bg); border: 1px solid var(--line); color: var(--text);
+    border-radius: var(--radius-sm); padding: 10px 14px; font-size: 14px;
+    font-family: inherit; resize: vertical;
+  }
+  .dash-form input:focus,
+  .dash-form textarea:focus {
+    outline: none; border-color: var(--gold);
+    box-shadow: 0 0 0 4px var(--gold-ring);
+  }
+  .dash-socials {
+    border: 1px dashed var(--line); border-radius: var(--radius);
+    padding: var(--space-3) var(--space-4); display: grid; gap: var(--space-2);
+  }
+  .dash-socials legend {
+    padding: 0 var(--space-2); color: var(--gold); font-size: 11px;
+    letter-spacing: 0.16em; text-transform: uppercase; font-weight: 600;
+  }
+
+  .brand-pick {
+    display: inline-flex; align-items: center; gap: var(--space-3);
+  }
+  .brand-pick input[type="color"] {
+    width: 56px; height: 36px; padding: 2px; cursor: pointer;
+  }
+  .brand-swatch {
+    width: 36px; height: 36px; border-radius: 50%;
+    border: 1px solid var(--line); background: var(--accent);
+  }
+
+  .dash-inline-form {
+    display: grid;
+    grid-template-columns: 1fr 96px 1.6fr auto;
+    gap: var(--space-2);
+    margin-bottom: var(--space-4);
+  }
+  .dash-inline-form input {
+    background: var(--bg); border: 1px solid var(--line); color: var(--text);
+    border-radius: var(--radius-sm); padding: 10px 14px; font-size: 13px;
+  }
+  .dash-inline-form input:focus {
+    outline: none; border-color: var(--gold);
+    box-shadow: 0 0 0 4px var(--gold-ring);
+  }
+
+  /* Stats grid -------------------------------------------------------- */
+  .dash-stats-grid {
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-3); margin: 0;
+  }
+  .dash-stats-grid > div {
+    background: var(--bg); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: var(--space-3) var(--space-4);
+  }
+  .dash-stats-grid dt { color: var(--muted); font-size: 11px;
+    letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 4px; }
+  .dash-stats-grid dd { font-size: 22px; font-weight: 700; color: var(--text); }
+
+  /* Tables ------------------------------------------------------------ */
+  .dash-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .dash-table th,
+  .dash-table td {
+    padding: 10px var(--space-3); text-align: left;
+    border-top: 1px solid var(--line); vertical-align: middle;
+  }
+  .dash-table thead th {
+    border-top: 0; border-bottom: 1px solid var(--line);
+    font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--muted); font-weight: 600;
+  }
+  .dash-table tbody tr:hover { background: rgba(255,255,255,0.02); }
+  .dash-table code {
+    font-family: 'Consolas', 'Courier New', monospace;
+    background: var(--bg); padding: 2px 8px; border-radius: var(--radius-sm);
+    border: 1px solid var(--line); font-size: 12px;
+  }
+  .dash-table .offer-msg {
+    max-width: 320px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .dash-row-actions { display: flex; gap: 6px; }
+  .dash-row-actions .btn { padding: 6px 12px; font-size: 12px; }
+  .dash-empty {
+    padding: var(--space-5) var(--space-4);
+    text-align: center; color: var(--muted); font-size: 13px;
+  }
+  .dash-status {
+    display: inline-block; padding: 3px 10px; border-radius: var(--radius-pill);
+    font-size: 10px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase;
+  }
+  .dash-status.pending  { background: var(--gold-soft); color: var(--gold); }
+  .dash-status.accepted { background: rgba(90,196,125,0.16); color: var(--success); }
+  .dash-status.declined { background: rgba(239,90,90,0.14); color: var(--danger); }
+}
+@layer responsive {
+  @media (max-width: 1024px) {
+    .dash-card     { grid-column: span 6; }
+    .dash-inline-form { grid-template-columns: 1fr 1fr; }
+  }
+  @media (max-width: 720px) {
+    .dash-card,
+    .dash-card-wide { grid-column: span 12; }
+    .dash-inline-form { grid-template-columns: 1fr; }
+    .dash-stats-grid  { grid-template-columns: 1fr; }
+    .dash-table .offer-msg { max-width: 160px; }
+  }
+}
+
+/* ==========================================================================
    UTILITIES
    ========================================================================== */
 @layer utilities {

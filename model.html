@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Model dashboard — AxMclub.com</title>
+  <meta name="robots" content="noindex,nofollow" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header id="navHost"></header>
+  <div id="gateHost"></div>
+
+  <main class="section dash-section">
+    <div class="container">
+      <header class="dash-head">
+        <span class="eyebrow">Model dashboard</span>
+        <h1 id="dashHello">Welcome.</h1>
+        <p class="muted">
+          <span id="dashEmail">—</span> · joined <span id="dashJoined">—</span>
+        </p>
+      </header>
+
+      <div class="dash-grid">
+
+        <!-- Profile editor -->
+        <section class="dash-card dash-card-wide" id="profileCard">
+          <h2>Public profile</h2>
+          <p class="muted">What members see on the Players page and when they message you.</p>
+          <form id="profileForm" class="form dash-form">
+            <label>Display name
+              <input name="name" type="text" required minlength="1" maxlength="60" />
+            </label>
+            <label>Bio <small class="muted">(max 280 chars)</small>
+              <textarea name="bio" rows="3" maxlength="280" placeholder="A short tagline. Vibe, hours, anything you want pinned."></textarea>
+            </label>
+            <label>Brand color
+              <span class="brand-pick">
+                <input name="brandColor" type="color" />
+                <span id="brandSwatch" class="brand-swatch" aria-hidden="true"></span>
+              </span>
+            </label>
+            <fieldset class="dash-socials">
+              <legend>Social links</legend>
+              <label>Telegram <input name="social_telegram" type="text" maxlength="200" placeholder="https://t.me/..." /></label>
+              <label>Snap     <input name="social_snap"     type="text" maxlength="200" placeholder="https://snapchat.com/add/..." /></label>
+              <label>Webcam   <input name="social_webcam"   type="text" maxlength="200" placeholder="https://stripchat.com/..." /></label>
+              <label>Fansite  <input name="social_fansite"  type="text" maxlength="200" placeholder="https://onlyfans.com/..." /></label>
+            </fieldset>
+            <button class="btn btn-primary" type="submit">Save profile</button>
+          </form>
+        </section>
+
+        <!-- Stats -->
+        <section class="dash-card" id="statsCard">
+          <h2>At a glance</h2>
+          <dl class="dash-stats-grid">
+            <div><dt>Passwords issued</dt><dd id="statPwIssued">—</dd></div>
+            <div><dt>Active codes</dt><dd id="statPwActive">—</dd></div>
+            <div><dt>Total redemptions</dt><dd id="statRedemptions">—</dd></div>
+            <div><dt>Offers received</dt><dd id="statOffersTotal">—</dd></div>
+            <div><dt>Open offers</dt><dd id="statOffersOpen">—</dd></div>
+            <div><dt>Accepted</dt><dd id="statOffersWon">—</dd></div>
+          </dl>
+        </section>
+
+        <!-- Passwords -->
+        <section class="dash-card dash-card-wide" id="passwordsCard">
+          <h2>Cam-room codes</h2>
+          <p class="muted">Hand a code to a member, they redeem it for a 10-minute pass.</p>
+          <form id="newPasswordForm" class="dash-inline-form">
+            <input name="password" placeholder="CODE (e.g. NOVA-NIGHT)" required minlength="2" maxlength="32" />
+            <input name="uses"     type="number" min="1" max="999" value="5" />
+            <input name="note"     placeholder="Note (optional)" maxlength="80" />
+            <button class="btn btn-primary" type="submit">Issue code</button>
+          </form>
+          <table class="dash-table">
+            <thead>
+              <tr><th>Code</th><th>Uses</th><th>Redeemed</th><th>Note</th><th></th></tr>
+            </thead>
+            <tbody id="pwBody">
+              <tr><td colspan="5" class="dash-empty">Loading…</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <!-- Offers -->
+        <section class="dash-card dash-card-wide" id="offersCard">
+          <h2>Offers addressed to you</h2>
+          <p class="muted">Members can target you by name in the "Make an offer" form.</p>
+          <table class="dash-table">
+            <thead>
+              <tr><th>When</th><th>From</th><th>Message</th><th>Status</th><th></th></tr>
+            </thead>
+            <tbody id="offersBody">
+              <tr><td colspan="5" class="dash-empty">Loading…</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+      </div>
+    </div>
+  </main>
+
+  <div id="modalHost"></div>
+  <footer id="footerHost"></footer>
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+
+  <script type="module">
+    import { initSharedLayout, requireModelAccount } from './js/layout.js';
+    import { initModelDashboard } from './js/model-dashboard.js';
+
+    initSharedLayout({ activePage: 'model' });
+
+    // Bounce non-models BEFORE wiring the dashboard. The server enforces
+    // this on every API call too, but the redirect keeps the UX clean.
+    requireModelAccount('/').then(user => {
+      if (user) initModelDashboard(user);
+    });
+  </script>
+</body>
+</html>
