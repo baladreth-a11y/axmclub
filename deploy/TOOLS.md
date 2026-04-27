@@ -8,7 +8,7 @@ git pull
 .\deploy\install-server-tools.ps1
 # or: .\deploy\install-server-tools.ps1 -IncludeRainmeter
 ```
-Installs **VS Code**, **Notepad++**, **Sysinternals Suite**, **bottom**, **AnyDesk**, and **jq** via winget. Optionally installs **Rainmeter** with `-IncludeRainmeter`.
+Installs **VS Code**, **Notepad++**, **Sysinternals Suite**, **bottom**, and **jq** via winget. Optionally installs **Rainmeter** with `-IncludeRainmeter`.
 ## Tools that need browser / Store steps
 ### Windows Admin Center (the big one)
 The closest thing to a "free Plesk" for Windows Server. Browser UI for services, files, scheduled tasks, performance, certificates, firewall, registry.
@@ -40,14 +40,6 @@ Add-AppxPackage -Path .\Files.msixbundle
    - Keyword: `members`
    - Alert: **When keyword is NOT present**
 4. **My Settings → Alert Contacts** → add email + (optionally) Telegram bot.
-### AnyDesk (replaces UltraVNC)
-Faster, smoother remote desktop than UltraVNC. The installer puts AnyDesk on the VPS as both a host and a client.
-1. The install script (`install-server-tools.ps1`) installs AnyDesk on the VPS automatically.
-2. Open AnyDesk on the VPS once -- it shows a 9-digit **AnyDesk ID** under "This Desk".
-3. Install AnyDesk on your dev box: `winget install AnyDeskSoftwareGmbH.AnyDesk`.
-4. From your dev box, type the VPS's AnyDesk ID into the "Remote Desk" box and hit **Connect**.
-5. The VPS will prompt to accept the connection (or set an unattended-access password under **Settings -> Security**; only do this if the AnyDesk install is on a server you fully trust).
-Free for personal use; commercial use needs a license.
 ### CrowdSec (skip for now)
 Their Windows agent is preview / experimental as of this writing. Linux-first project. Revisit when they GA Windows.
 ## Daily-use shortcuts

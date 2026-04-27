@@ -7,7 +7,6 @@
 #   - Notepad++             (quick edits + log tail)
 #   - Sysinternals Suite    (Process Explorer, TCPView, Autoruns, Procmon)
 #   - bottom (btm)          (terminal-based system monitor)
-#   - AnyDesk               (faster, smoother remote desktop than UltraVNC)
 #   - jq                    (CLI JSON pretty-printer for db.json)
 #
 # Optional with -IncludeRainmeter:
@@ -90,14 +89,11 @@ Try-Install -Label 'Sysinternals Suite'  -Probe 'procexp'   -WingetId 'Microsoft
 Step '4. bottom (btm) - terminal system monitor'
 Try-Install -Label 'bottom'              -Probe 'btm'       -WingetId 'Clement.bottom'              -ChocoId 'bottom'
 
-Step '5. AnyDesk (remote desktop client/host)'
-Try-Install -Label 'AnyDesk'             -Probe 'AnyDesk'   -WingetId 'AnyDeskSoftwareGmbH.AnyDesk' -ChocoId 'anydesk.install'
-
-Step '6. jq (CLI JSON pretty-printer)'
+Step '5. jq (CLI JSON pretty-printer)'
 Try-Install -Label 'jq'                  -Probe 'jq'        -WingetId 'jqlang.jq'                   -ChocoId 'jq'
 
 if ($IncludeRainmeter) {
-    Step '7. Rainmeter (desktop widgets)'
+    Step '6. Rainmeter (desktop widgets)'
     Try-Install -Label 'Rainmeter'       -Probe 'Rainmeter' -WingetId 'Rainmeter.Rainmeter'         -ChocoId 'rainmeter'
 } else {
     Info 'Skipping Rainmeter (pass -IncludeRainmeter to include).'
@@ -113,7 +109,6 @@ foreach ($pair in @(
     @{ cmd='procexp';     label='Process Explorer (Sysinternals)' },
     @{ cmd='tcpview';     label='TCPView'                     },
     @{ cmd='btm';         label='bottom'                      },
-    @{ cmd='AnyDesk';     label='AnyDesk'                     },
     @{ cmd='jq';          label='jq'                          }
 )) {
     if (Have-Command $pair.cmd) {
@@ -128,7 +123,6 @@ Write-Host "Done. Next up (manual / browser):" -ForegroundColor Yellow
 Write-Host "  * Windows Admin Center:  https://aka.ms/WACDownload  (download MSI, install, browse to https://localhost:6516)"
 Write-Host "  * Files (file manager):  Open Microsoft Store on the VPS, search 'Files', Install"
 Write-Host "  * UptimeRobot:           https://uptimerobot.com -> sign up -> Add Monitor (HTTPS) for axmcamclub.com"
-Write-Host "  * AnyDesk:               note the 9-digit AnyDesk ID shown in the app, install on dev box too, connect by ID"
 Write-Host "  * CrowdSec:              skip for now; their Windows agent is still preview-grade"
 Write-Host ""
 Write-Host "Tip: pin Process Explorer + TCPView to the taskbar for one-click access."
