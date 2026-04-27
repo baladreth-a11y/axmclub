@@ -183,6 +183,16 @@ $Script:FeedbackMaxLength     = 2000
 $Script:FeedbackMaxStored     = 1000
 $Script:FeedbackTypes         = @('bug','idea','other')
 
+# Communicator (presence + 1:1 chat) limits.
+$Script:OnlineWindowMs        = 60 * 1000        # "online" = lastSeenMs newer than 60s
+$Script:LastSeenSaveStepMs    = 5 * 1000         # only save lastSeenMs if it changed >5s
+$Script:ChatMessageMax        = 2000
+$Script:ChatMessagesPerThread = 200
+$Script:ChatRate              = @{}              # email -> @( unixMs, ... )
+$Script:ChatRateWindowMs      = 60 * 1000        # 1 minute rolling window
+$Script:ChatRateMaxPerWindow  = 30
+$Script:DmPolicies            = @('open','mutual','closed')
+
 # ---------- Helpers ----------
 function ConvertTo-Hashtable {
   param($obj)
@@ -212,6 +222,7 @@ function Load-Db {
       stats    = @{ members = 0; spins = 0 }
       results  = @()
       feedback = @()
+      threads  = @{}
     }
   }
   try {
@@ -224,10 +235,11 @@ function Load-Db {
     if (-not $h.stats)    { $h.stats    = @{ members = 0; spins = 0 } }
     if (-not $h.results)  { $h.results  = @() }
     if (-not $h.feedback) { $h.feedback = @() }
+    if (-not $h.threads)  { $h.threads  = @{} }
     return $h
   } catch {
     Write-Host "WARN: Could not read db.json, starting fresh. ($_)" -ForegroundColor Yellow
-    return @{ users=@{}; sessions=@{}; stats=@{members=0;spins=0}; results=@(); feedback=@() }
+    return @{ users=@{}; sessions=@{}; stats=@{members=0;spins=0}; results=@(); feedback=@(); threads=@{} }
   }
 }
 
@@ -409,6 +421,40 @@ function Get-ModelByEmailOrSlug($db, [string]$key) {
   return $null
 }
 
+# Default DM policy depends on account type. Models opt in to the open
+# inbox so supporters can reach them; supporters keep DMs open by default
+# too, but each user can switch to mutual/closed via /api/chat/policy.
+function Default-DmPolicy([string]$accountType) {
+  return 'open'
+}
+
+# Default cam2cam opt-in: models on, supporters off (until they opt in).
+function Default-Cam2Cam([string]$accountType) {
+  if ("$accountType".ToLowerInvariant() -eq 'model') { return $true }
+  return $false
+}
+
+function Test-IsOnline($u) {
+  if (-not $u) { return $false }
+  if (-not $u.lastSeenMs) { return $false }
+  $now = NowMs
+  return ($now - [long]$u.lastSeenMs) -lt [long]$Script:OnlineWindowMs
+}
+
+# Deterministic 1:1 thread id from a pair of emails. Lower-cased and
+# sorted so threadId(a,b) == threadId(b,a). SHA1 truncated to 32 hex.
+function Get-ThreadId([string]$a, [string]$b) {
+  $la = ("$a").ToLowerInvariant()
+  $lb = ("$b").ToLowerInvariant()
+  if ($la -le $lb) { $key = $la + '|' + $lb } else { $key = $lb + '|' + $la }
+  $sha = [Security.Cryptography.SHA1]::Create()
+  $bytes = [Text.Encoding]::UTF8.GetBytes($key)
+  $hash = $sha.ComputeHash($bytes)
+  $sb = New-Object Text.StringBuilder
+  foreach ($byte in $hash) { [void]$sb.Append($byte.ToString('x2')) }
+  return $sb.ToString().Substring(0, 32)
+}
+
 function Public-User($u) {
   if (-not $u) { return $null }
   $redCount = 0
@@ -444,6 +490,17 @@ function Public-User($u) {
       if ($u.socials[$k]) { $socials[$k] = [string]$u.socials[$k] }
     }
   }
+  $lastSeen = 0
+  if ($u.lastSeenMs) { $lastSeen = [long]$u.lastSeenMs }
+  $cam2cam = Default-Cam2Cam $acct
+  if ($u.PSObject.Properties['cam2cam'] -or ($u -is [hashtable] -and $u.ContainsKey('cam2cam'))) {
+    $cam2cam = [bool]$u.cam2cam
+  }
+  $dmPolicy = Default-DmPolicy $acct
+  if ($u.dmPolicy) {
+    $candidate = ([string]$u.dmPolicy).ToLowerInvariant()
+    if ($Script:DmPolicies -contains $candidate) { $dmPolicy = $candidate }
+  }
   return @{
     name           = $u.name
     email          = $u.email
@@ -466,6 +523,10 @@ function Public-User($u) {
     slug           = $slug
     emailVerified  = $verified
     galleryCount   = $galleryCount
+    lastSeenMs     = $lastSeen
+    online         = (Test-IsOnline $u)
+    cam2cam        = $cam2cam
+    dmPolicy       = $dmPolicy
   }
 }
 
@@ -719,7 +780,18 @@ function Require-Auth($req, $resp, $db) {
     Send-Json $resp @{ error = 'Sign in required.' } 401
     return $null
   }
-  return $s.user
+  # Refresh presence on every authed call. Throttle to one save per
+  # ~5s so a tight polling loop doesn't hammer the disk — the in-memory
+  # value updates every call so /api/online sees the latest stamp.
+  $u = $s.user
+  $now = NowMs
+  $prev = 0
+  if ($u.lastSeenMs) { $prev = [long]$u.lastSeenMs }
+  $u.lastSeenMs = $now
+  if (($now - $prev) -ge [long]$Script:LastSeenSaveStepMs) {
+    try { Save-Db $db } catch {}
+  }
+  return $u
 }
 
 # Returns $true if the request carries a valid x-admin-key that matches
@@ -804,6 +876,9 @@ function Handle-Auth($req, $resp, $db, $path, $method) {
         bio           = ''
         brandColor    = ''
         socials       = @{ telegram=''; snap=''; webcam=''; fansite='' }
+        lastSeenMs    = NowMs
+        cam2cam       = (Default-Cam2Cam $accountType)
+        dmPolicy      = (Default-DmPolicy $accountType)
       }
       Ensure-Slug $db $db.users[$email] | Out-Null
       $db.stats.members = [int]$db.stats.members + 1
@@ -2215,6 +2290,314 @@ function Handle-Feedback($req, $resp, $db, $path, $method) {
   return $false
 }
 
+# ---- Communicator: presence + 1:1 chat ---------------------------------
+# All endpoints below require auth via Require-Auth (which also refreshes
+# lastSeenMs). Threads keyed by Get-ThreadId so the lookup is deterministic
+# and order-independent.
+function Test-ChatRate([string]$email) {
+  $now = NowMs
+  $cutoff = $now - [long]$Script:ChatRateWindowMs
+  $existing = @()
+  if ($Script:ChatRate.ContainsKey($email)) {
+    foreach ($t in @($Script:ChatRate[$email])) {
+      if ([long]$t -ge $cutoff) { $existing += [long]$t }
+    }
+  }
+  if ($existing.Count -ge [int]$Script:ChatRateMaxPerWindow) { return $false }
+  $existing += $now
+  $Script:ChatRate[$email] = $existing
+  return $true
+}
+
+function Get-OrCreateThread($db, [string]$a, [string]$b) {
+  if (-not $db.threads) { $db.threads = @{} }
+  $tid = Get-ThreadId $a $b
+  if (-not $db.threads.ContainsKey($tid)) {
+    $la = ("$a").ToLowerInvariant()
+    $lb = ("$b").ToLowerInvariant()
+    if ($la -le $lb) { $first = $la; $second = $lb } else { $first = $lb; $second = $la }
+    $db.threads[$tid] = @{
+      id        = $tid
+      a         = $first
+      b         = $second
+      createdAt = NowMs
+      lastMs    = 0
+      messages  = @()
+      lastRead  = @{}
+    }
+  } else {
+    if (-not $db.threads[$tid].lastRead) { $db.threads[$tid].lastRead = @{} }
+  }
+  return $db.threads[$tid]
+}
+
+# Returns true if `sender` is allowed to DM `peer` based on the peer's
+# dmPolicy setting. 'open' = anyone, 'mutual' = peer has DM'd me at least
+# once before, 'closed' = no one but the peer themself.
+function Test-DmAllowed($db, $sender, $peer) {
+  $policy = 'open'
+  if ($peer.dmPolicy) {
+    $candidate = ([string]$peer.dmPolicy).ToLowerInvariant()
+    if ($Script:DmPolicies -contains $candidate) { $policy = $candidate }
+  }
+  if ($policy -eq 'open') { return $true }
+  if ($policy -eq 'closed') { return $false }
+  # mutual: allow only if there's an existing thread where peer has sent
+  # a message to sender (or to anyone in the thread that includes sender).
+  $tid = Get-ThreadId $sender.email $peer.email
+  if (-not $db.threads.ContainsKey($tid)) { return $false }
+  $thread = $db.threads[$tid]
+  if (-not $thread.messages) { return $false }
+  foreach ($m in @($thread.messages)) {
+    if (([string]$m.from).ToLowerInvariant() -eq ([string]$peer.email).ToLowerInvariant()) {
+      return $true
+    }
+  }
+  return $false
+}
+
+function Public-Online($u) {
+  if (-not $u) { return $null }
+  $acct = 'supporter'
+  if ($u.accountType) { $acct = [string]$u.accountType }
+  $slug = ''
+  if ($u.slug) { $slug = [string]$u.slug }
+  $photo = ''
+  if ($u.photoUrl) { $photo = [string]$u.photoUrl }
+  $cam2cam = Default-Cam2Cam $acct
+  if ($u.PSObject.Properties['cam2cam'] -or ($u -is [hashtable] -and $u.ContainsKey('cam2cam'))) {
+    $cam2cam = [bool]$u.cam2cam
+  }
+  return @{
+    email       = [string]$u.email
+    name        = [string]$u.name
+    accountType = $acct
+    isModel     = ($acct -eq 'model')
+    slug        = $slug
+    photoUrl    = $photo
+    lastSeenMs  = [long]$u.lastSeenMs
+    cam2cam     = $cam2cam
+  }
+}
+
+function Handle-Chat($req, $resp, $db, $path, $method) {
+  $key = "$method $path"
+  switch ($key) {
+
+    'GET /api/online' {
+      $u = Require-Auth $req $resp $db
+      if (-not $u) { return $true }
+      $list = @()
+      foreach ($email in $db.users.Keys) {
+        $other = $db.users[$email]
+        if (([string]$other.email).ToLowerInvariant() -eq ([string]$u.email).ToLowerInvariant()) { continue }
+        if (-not (Test-IsOnline $other)) { continue }
+        $list += (Public-Online $other)
+      }
+      $list = @($list | Sort-Object -Property { -1 * [long]$_.lastSeenMs })
+      if ($list.Count -gt 100) { $list = @($list[0..99]) }
+      Send-Json $resp @{ users = @($list); count = @($list).Count }
+      return $true
+    }
+
+    'GET /api/chat/threads' {
+      $u = Require-Auth $req $resp $db
+      if (-not $u) { return $true }
+      $myEmail = ([string]$u.email).ToLowerInvariant()
+      $list = @()
+      if ($db.threads) {
+        foreach ($tid in $db.threads.Keys) {
+          $t = $db.threads[$tid]
+          $a = ([string]$t.a).ToLowerInvariant()
+          $b = ([string]$t.b).ToLowerInvariant()
+          if ($a -ne $myEmail -and $b -ne $myEmail) { continue }
+          $peerEmail = if ($a -eq $myEmail) { $b } else { $a }
+          $peer = $null
+          if ($db.users.ContainsKey($peerEmail)) { $peer = $db.users[$peerEmail] }
+          $peerName = $peerEmail
+          $peerOnline = $false
+          if ($peer) {
+            $peerName = [string]$peer.name
+            $peerOnline = Test-IsOnline $peer
+          }
+          $msgs = @()
+          if ($t.messages) { $msgs = @($t.messages) }
+          $myLastRead = 0
+          if ($t.lastRead -and $t.lastRead.ContainsKey($myEmail)) { $myLastRead = [long]$t.lastRead[$myEmail] }
+          $unread = 0
+          $lastMessage = ''
+          $lastFrom = ''
+          $lastAt = [long]$t.lastMs
+          foreach ($m in $msgs) {
+            if (([string]$m.from).ToLowerInvariant() -ne $myEmail -and [long]$m.at -gt $myLastRead) {
+              $unread += 1
+            }
+          }
+          if ($msgs.Count -gt 0) {
+            $last = $msgs[-1]
+            $lastMessage = [string]$last.text
+            $lastFrom = [string]$last.from
+            $lastAt = [long]$last.at
+          }
+          $list += @{
+            id          = [string]$t.id
+            peerEmail   = $peerEmail
+            peerName    = $peerName
+            peerOnline  = $peerOnline
+            unread      = $unread
+            lastMessage = $lastMessage
+            lastFrom    = $lastFrom
+            lastMs      = $lastAt
+          }
+        }
+      }
+      $list = @($list | Sort-Object -Property { -1 * [long]$_.lastMs })
+      $totalUnread = 0
+      foreach ($t in $list) { $totalUnread += [int]$t.unread }
+      Send-Json $resp @{ threads = @($list); count = @($list).Count; unread = $totalUnread }
+      return $true
+    }
+
+    'GET /api/chat/messages' {
+      $u = Require-Auth $req $resp $db
+      if (-not $u) { return $true }
+      $peerArg = ''
+      $sinceArg = 0
+      if ($req.Url.Query) {
+        $q = [System.Web.HttpUtility]::ParseQueryString($req.Url.Query)
+        if ($q['peer'])  { $peerArg = [string]$q['peer'] }
+        if ($q['since']) { $sinceArg = [long]$q['since'] }
+      }
+      $peerEmail = $peerArg.Trim().ToLowerInvariant()
+      if (-not $peerEmail) {
+        Send-Json $resp @{ error = 'peer query parameter is required.' } 400
+        return $true
+      }
+      if ($peerEmail -eq ([string]$u.email).ToLowerInvariant()) {
+        Send-Json $resp @{ error = 'Cannot message yourself.' } 400
+        return $true
+      }
+      if (-not $db.users.ContainsKey($peerEmail)) {
+        Send-Json $resp @{ error = 'Peer not found.' } 404
+        return $true
+      }
+      $peer = $db.users[$peerEmail]
+      $thread = Get-OrCreateThread $db $u.email $peer.email
+      $myEmail = ([string]$u.email).ToLowerInvariant()
+      $now = NowMs
+      $touched = $false
+      $out = @()
+      if ($thread.messages) {
+        foreach ($m in @($thread.messages)) {
+          if ([long]$m.at -le [long]$sinceArg) { continue }
+          $out += @{
+            id     = [string]$m.id
+            from   = [string]$m.from
+            text   = [string]$m.text
+            at     = [long]$m.at
+          }
+        }
+      }
+      # Mark thread as read up to now for the caller; persists per user.
+      if (-not $thread.lastRead) { $thread.lastRead = @{} }
+      $prevRead = 0
+      if ($thread.lastRead.ContainsKey($myEmail)) { $prevRead = [long]$thread.lastRead[$myEmail] }
+      if ($now -gt $prevRead) {
+        $thread.lastRead[$myEmail] = $now
+        $touched = $true
+      }
+      if ($touched) { Save-Db $db }
+      Send-Json $resp @{
+        threadId   = [string]$thread.id
+        peerEmail  = [string]$peer.email
+        peerName   = [string]$peer.name
+        peerOnline = (Test-IsOnline $peer)
+        peerCam2cam = ([bool](Public-Online $peer).cam2cam)
+        myCam2cam  = ([bool](Public-Online $u).cam2cam)
+        messages   = @($out)
+      }
+      return $true
+    }
+
+    'POST /api/chat/send' {
+      $u = Require-Auth $req $resp $db
+      if (-not $u) { return $true }
+      $body = Read-JsonBody $req
+      $peerArg = ("$($body.peer)").Trim().ToLowerInvariant()
+      $text = ("$($body.text)").Trim()
+      if (-not $peerArg) {
+        Send-Json $resp @{ error = 'peer is required.' } 400
+        return $true
+      }
+      if ($peerArg -eq ([string]$u.email).ToLowerInvariant()) {
+        Send-Json $resp @{ error = 'Cannot message yourself.' } 400
+        return $true
+      }
+      if (-not $text) {
+        Send-Json $resp @{ error = 'Message text is required.' } 400
+        return $true
+      }
+      if ($text.Length -gt [int]$Script:ChatMessageMax) {
+        Send-Json $resp @{ error = ("Message must be at most " + $Script:ChatMessageMax + " characters.") } 400
+        return $true
+      }
+      if (-not $db.users.ContainsKey($peerArg)) {
+        Send-Json $resp @{ error = 'Peer not found.' } 404
+        return $true
+      }
+      $peer = $db.users[$peerArg]
+      if (-not (Test-DmAllowed $db $u $peer)) {
+        Send-Json $resp @{ error = 'Recipient is not accepting DMs.'; reason = 'dm-policy' } 403
+        return $true
+      }
+      if (-not (Test-ChatRate $u.email)) {
+        Send-Json $resp @{ error = 'Too many messages — slow down.'; reason = 'rate-limit' } 429
+        return $true
+      }
+      $thread = Get-OrCreateThread $db $u.email $peer.email
+      $now = NowMs
+      $msg = @{
+        id   = (New-Token)
+        from = [string]$u.email
+        text = $text
+        at   = $now
+      }
+      if (-not $thread.messages) { $thread.messages = @() }
+      $thread.messages = @($thread.messages) + $msg
+      if ($thread.messages.Count -gt [int]$Script:ChatMessagesPerThread) {
+        $thread.messages = @($thread.messages[($thread.messages.Count - [int]$Script:ChatMessagesPerThread)..($thread.messages.Count - 1)])
+      }
+      $thread.lastMs = $now
+      # Sender has implicitly read their own message up to now.
+      if (-not $thread.lastRead) { $thread.lastRead = @{} }
+      $thread.lastRead[([string]$u.email).ToLowerInvariant()] = $now
+      Save-Db $db
+      Send-Json $resp @{
+        ok       = $true
+        threadId = [string]$thread.id
+        message  = $msg
+      }
+      return $true
+    }
+
+    'POST /api/chat/policy' {
+      $u = Require-Auth $req $resp $db
+      if (-not $u) { return $true }
+      $body = Read-JsonBody $req
+      $policy = ("$($body.policy)").Trim().ToLowerInvariant()
+      if ($Script:DmPolicies -notcontains $policy) {
+        Send-Json $resp @{ error = 'Invalid policy. Allowed: open, mutual, closed.' } 400
+        return $true
+      }
+      $u.dmPolicy = $policy
+      Save-Db $db
+      Send-Json $resp @{ ok = $true; dmPolicy = $policy; user = (Public-User $u) }
+      return $true
+    }
+  }
+  return $false
+}
+
 # ---- Community: leaderboard --------------------------------------------
 function Handle-Community($req, $resp, $db, $path, $method) {
   if ("$method $path" -eq 'GET /api/leaderboard') {
@@ -2246,6 +2629,8 @@ function Handle-Api($req, $resp, $path, $method) {
   if (Handle-Community $req $resp $db $path $method) { return }
   # Always-on Feedback widget (POST is anonymous; admin GET/resolve gated).
   if (Handle-Feedback  $req $resp $db $path $method) { return }
+  # Communicator: presence (/api/online) + 1:1 chat (/api/chat/*).
+  if (Handle-Chat      $req $resp $db $path $method) { return }
   # Public model gallery + per-model detail (verification gated).
   if (Handle-Models    $req $resp $db $path $method) { return }
   # Email verification: start + confirm.

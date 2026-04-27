@@ -28,6 +28,8 @@ import { initAuth } from './auth.js';
 import { initModels } from './models.js';
 import { initVerifyBanner } from './verify.js';
 import { initFeedback } from './feedback.js';
+import { initCommunicator } from './communicator.js';
+import { api } from './api.js';
 
 // ---- Markup ---------------------------------------------------------
 // Navbar. The "Model dashboard" link is hidden by default and revealed
@@ -225,6 +227,23 @@ const modalMarkup = `
             <li class="activity-empty">Loading activity…</li>
           </ul>
         </div>
+        <div class="profile-dm-policy">
+          <span class="profile-dm-policy-label">Who can DM me</span>
+          <div class="dm-policy-segment" role="radiogroup" aria-label="DM policy">
+            <label class="dm-policy-option">
+              <input type="radio" name="dmPolicy" value="open" />
+              <span>Open</span>
+            </label>
+            <label class="dm-policy-option">
+              <input type="radio" name="dmPolicy" value="mutual" />
+              <span>Mutual</span>
+            </label>
+            <label class="dm-policy-option">
+              <input type="radio" name="dmPolicy" value="closed" />
+              <span>Closed</span>
+            </label>
+          </div>
+        </div>
         <div class="profile-actions">
           <button class="btn btn-outline btn-block" onclick="closeModal()">Close</button>
           <button id="profileLogout" class="btn btn-ghost btn-block">Sign out</button>
@@ -275,6 +294,30 @@ export function initSharedLayout({ activePage = null } = {}) {
   // Always-on Feedback & Ideas FAB (bottom-right). Mounted on every
   // page that uses initSharedLayout. Submissions land in db.feedback.
   initFeedback();
+  // Always-on Communicator (bottom-left). Lazy: presence + threads only
+  // poll once a signed-in user is set on the store.
+  initCommunicator();
+
+  // Keep the DM-policy radio in the profile modal in sync with the
+  // signed-in user's policy and persist edits via api.chatPolicy.
+  const dmRadios = document.querySelectorAll('.dm-policy-segment input[name="dmPolicy"]');
+  if (dmRadios.length) {
+    const applyPolicy = state => {
+      const policy = (state.user && state.user.dmPolicy) || 'open';
+      dmRadios.forEach(r => { r.checked = (r.value === policy); });
+    };
+    applyPolicy(store.get());
+    store.subscribe(applyPolicy);
+    dmRadios.forEach(r => r.addEventListener('change', async () => {
+      if (!r.checked) return;
+      try {
+        const res = await api.chatPolicy(r.value);
+        if (res && res.user) store.set({ user: res.user });
+      } catch (err) {
+        console.error('[axm] dmPolicy update failed:', err);
+      }
+    }));
+  }
 
   // Toggle the "Model dashboard" nav link based on accountType.
   const modelLink = $('#navModelLink');

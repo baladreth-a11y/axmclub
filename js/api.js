@@ -88,5 +88,13 @@ export const api = {
   galleryRemove:    url  => request('/api/model/gallery/remove', { method: 'POST', body: { url } }),
 
   // Feedback widget. POST is anonymous-friendly.
-  submitFeedback:        body => request('/api/feedback', { method: 'POST', body })
+  submitFeedback:        body => request('/api/feedback', { method: 'POST', body }),
+
+  // Communicator: presence + 1:1 chat. All require auth.
+  online:        () => request('/api/online'),
+  chatThreads:   () => request('/api/chat/threads'),
+  chatMessages:  (peer, since = 0) =>
+    request('/api/chat/messages?peer=' + encodeURIComponent(peer) + '&since=' + (since | 0)),
+  chatSend:      (peer, text) => request('/api/chat/send', { method: 'POST', body: { peer, text } }),
+  chatPolicy:    policy => request('/api/chat/policy', { method: 'POST', body: { policy } })
 };

@@ -142,6 +142,26 @@ try {
   Ok 'Anonymous /api/admin/feedback -> 403'      ($fbAdmin403 -eq 403) ('got ' + $fbAdmin403)
 
   Write-Host ""
+  Write-Host "== 12. Communicator (presence + 1:1 chat) ==" -ForegroundColor Cyan
+  $commJs = Invoke-WebRequest -Uri ($Base + '/js/communicator.js') -UseBasicParsing
+  Ok 'GET /js/communicator.js returns 200'         ($commJs.StatusCode -eq 200)
+  Ok 'communicator.js exports initCommunicator'    ($commJs.Content -match 'export function initCommunicator')
+  Ok 'layout.js wires initCommunicator()'          ($layoutJs.Content -match 'initCommunicator\(\)')
+
+  $cssBody = (Invoke-WebRequest -Uri ($Base + '/styles.css') -UseBasicParsing).Content
+  Ok 'styles.css ships .comm-fab'                  ($cssBody -match '\.comm-fab')
+  Ok 'styles.css ships .online-dot'                ($cssBody -match '\.online-dot')
+
+  $onlineCode = 0
+  try { $null = Invoke-RestMethod -Uri ($Base + '/api/online') } catch { $onlineCode = Code $_ }
+  Ok 'Anonymous /api/online -> 401'                ($onlineCode -eq 401) ('got ' + $onlineCode)
+
+  $signedMe = Invoke-RestMethod -Uri ($Base + '/api/me') -WebSession $sess
+  Ok 'Public-User exposes lastSeenMs'              ($null -ne $signedMe.user.lastSeenMs)
+  Ok 'Public-User exposes online flag'             ($null -ne $signedMe.user.online)
+  Ok 'Public-User exposes dmPolicy'                ($signedMe.user.dmPolicy -in @('open','mutual','closed'))
+
+  Write-Host ""
   Write-Host ("== Manual verify summary: " + $pass + ' passed, ' + $fail + ' failed ==') -ForegroundColor $(if ($fail) { 'Red' } else { 'Green' })
 }
 finally {

@@ -957,6 +957,103 @@ try {
     $cssSrc = (Invoke-WebRequest -Uri ($Base + '/styles.css') -UseBasicParsing).Content
     Check 'styles.css ships .feedback-fab'  ($cssSrc -match '\.feedback-fab')
 
+    Section '23. Communicator: presence + 1:1 chat'
+
+    # Anonymous /api/online -> 401 (auth required).
+    $onAnon = 0
+    try { $null = Invoke-RestMethod -Uri ($Base + '/api/online') } catch { $onAnon = StatusCodeOf $_ }
+    Check 'Anonymous /api/online returns 401' ($onAnon -eq 401) ('got ' + $onAnon)
+
+    # Two fresh sessions: chatA + chatB.
+    $chatA = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+    $null  = Invoke-RestMethod -Uri ($Base + '/api/register') -Method Post -ContentType 'application/json' -WebSession $chatA `
+        -Body (JsonBody @{ name='ChatA'; email='chat-a@example.com'; password='abcd' })
+    $chatB = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+    $null  = Invoke-RestMethod -Uri ($Base + '/api/register') -Method Post -ContentType 'application/json' -WebSession $chatB `
+        -Body (JsonBody @{ name='ChatB'; email='chat-b@example.com'; password='abcd' })
+
+    # ChatA pings /api/me to refresh lastSeenMs; both should appear online to each other.
+    $null = Invoke-RestMethod -Uri ($Base + '/api/me') -WebSession $chatA
+    $onA  = Invoke-RestMethod -Uri ($Base + '/api/online') -WebSession $chatA
+    $emails = ''
+    foreach ($u in @($onA.users)) { $emails = $emails + ',' + $u.email }
+    Check 'Online list includes peer'             ($emails -match 'chat-b@example.com') ('got ' + $emails)
+    Check 'Online list excludes self'             (-not ($emails -match 'chat-a@example.com'))
+    Check 'Public-Online has cam2cam field'       ([bool](@($onA.users)[0]).PSObject.Properties['cam2cam'])
+
+    # ChatA sends DM to ChatB.
+    $sendOk = Invoke-RestMethod -Uri ($Base + '/api/chat/send') -Method Post -ContentType 'application/json' -WebSession $chatA `
+        -Body (JsonBody @{ peer='chat-b@example.com'; text='Hello from A!' })
+    Check 'Chat send returns ok'                  ($sendOk.ok -eq $true)
+    Check 'Chat send returns thread id'           ([bool]$sendOk.threadId)
+    Check 'Chat send returns message with id'     ([bool]$sendOk.message -and [bool]$sendOk.message.id)
+
+    # Empty text -> 400.
+    $emptyChat = 0
+    try {
+        $null = Invoke-RestMethod -Uri ($Base + '/api/chat/send') -Method Post -ContentType 'application/json' -WebSession $chatA -Body (JsonBody @{ peer='chat-b@example.com'; text='   ' })
+    } catch { $emptyChat = StatusCodeOf $_ }
+    Check 'Empty chat text returns 400'           ($emptyChat -eq 400) ('got ' + $emptyChat)
+
+    # Self-DM -> 400.
+    $selfChat = 0
+    try {
+        $null = Invoke-RestMethod -Uri ($Base + '/api/chat/send') -Method Post -ContentType 'application/json' -WebSession $chatA -Body (JsonBody @{ peer='chat-a@example.com'; text='hi me' })
+    } catch { $selfChat = StatusCodeOf $_ }
+    Check 'Chatting yourself returns 400'         ($selfChat -eq 400) ('got ' + $selfChat)
+
+    # Unknown peer -> 404.
+    $unkPeer = 0
+    try {
+        $null = Invoke-RestMethod -Uri ($Base + '/api/chat/send') -Method Post -ContentType 'application/json' -WebSession $chatA -Body (JsonBody @{ peer='nobody@example.com'; text='hi' })
+    } catch { $unkPeer = StatusCodeOf $_ }
+    Check 'Sending to unknown peer returns 404'   ($unkPeer -eq 404) ('got ' + $unkPeer)
+
+    # ChatB threads view shows unread=1 with last message preview.
+    $bThreads = Invoke-RestMethod -Uri ($Base + '/api/chat/threads') -WebSession $chatB
+    Check 'ChatB has at least one thread'         (@($bThreads.threads).Count -ge 1) ('got ' + @($bThreads.threads).Count)
+    $bThread = @($bThreads.threads) | Where-Object { $_.peerEmail -eq 'chat-a@example.com' } | Select-Object -First 1
+    Check 'ChatB thread points back at ChatA'     ($null -ne $bThread)
+    if ($bThread) {
+        Check 'ChatB unread is 1'                   ([int]$bThread.unread -eq 1) ('got ' + $bThread.unread)
+        Check 'Last message preview matches'        ($bThread.lastMessage -eq 'Hello from A!')
+    }
+    Check 'Threads payload exposes total unread'  ([int]$bThreads.unread -ge 1)
+
+    # Fetching messages marks the thread as read.
+    $bMsgs = Invoke-RestMethod -Uri ($Base + '/api/chat/messages?peer=chat-a@example.com') -WebSession $chatB
+    Check 'Messages endpoint returns array'       ($null -ne $bMsgs.messages -and (@($bMsgs.messages)).Count -ge 1)
+    Check 'Messages payload exposes peerName'     ($bMsgs.peerName -eq 'ChatA')
+    Check 'Messages exposes peerCam2cam flag'     ([bool]$bMsgs.PSObject.Properties['peerCam2cam'])
+    $bThreads2 = Invoke-RestMethod -Uri ($Base + '/api/chat/threads') -WebSession $chatB
+    $bThread2 = @($bThreads2.threads) | Where-Object { $_.peerEmail -eq 'chat-a@example.com' } | Select-Object -First 1
+    Check 'Reading messages clears unread'        ($bThread2 -and [int]$bThread2.unread -eq 0) ('got ' + ($(if ($bThread2) { $bThread2.unread } else { 'none' })))
+
+    # DM policy: ChatB closes inbox; ChatA send -> 403; ChatA can still send if ChatB had previously DM'd — but our flow has ChatA initiating, so 'closed' blocks regardless.
+    $polClose = Invoke-RestMethod -Uri ($Base + '/api/chat/policy') -Method Post -ContentType 'application/json' -WebSession $chatB -Body (JsonBody @{ policy='closed' })
+    Check 'Set dmPolicy=closed returns ok'         ($polClose.ok -eq $true -and $polClose.dmPolicy -eq 'closed')
+    $closedSend = 0
+    try {
+        $null = Invoke-RestMethod -Uri ($Base + '/api/chat/send') -Method Post -ContentType 'application/json' -WebSession $chatA -Body (JsonBody @{ peer='chat-b@example.com'; text='still there?' })
+    } catch { $closedSend = StatusCodeOf $_ }
+    Check 'Closed inbox blocks further DMs (403)' ($closedSend -eq 403) ('got ' + $closedSend)
+
+    # Restore policy for the rate-limit test.
+    $null = Invoke-RestMethod -Uri ($Base + '/api/chat/policy') -Method Post -ContentType 'application/json' -WebSession $chatB -Body (JsonBody @{ policy='open' })
+
+    # Bad policy value -> 400.
+    $badPol = 0
+    try {
+        $null = Invoke-RestMethod -Uri ($Base + '/api/chat/policy') -Method Post -ContentType 'application/json' -WebSession $chatA -Body (JsonBody @{ policy='nope' })
+    } catch { $badPol = StatusCodeOf $_ }
+    Check 'Invalid dmPolicy returns 400'           ($badPol -eq 400) ('got ' + $badPol)
+
+    # Frontend artifacts.
+    Check 'GET /js/communicator.js returns 200' ((Invoke-WebRequest -Uri ($Base + '/js/communicator.js') -UseBasicParsing).StatusCode -eq 200)
+    Check 'layout.js wires initCommunicator()' ($layoutSrc -match 'initCommunicator\(\)')
+    Check 'styles.css ships .comm-fab'         ($cssSrc -match '\.comm-fab')
+    Check 'styles.css ships .online-dot'       ($cssSrc -match '\.online-dot')
+
     Section 'Summary'
     Log ('  Passed: ' + $script:pass) 'Green'
     $failColor = 'Green'
