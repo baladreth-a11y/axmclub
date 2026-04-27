@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Players — AxMclub.com</title>
-  <meta name="description" content="The roster of AxMcamPlayers — connect on Telegram, Snap, webcam." />
+  <title>Model — AxMclub.com</title>
+  <meta name="robots" content="noindex,nofollow" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet" />
@@ -14,21 +14,13 @@
   <header id="navHost"></header>
   <div id="gateHost"></div>
 
-  <section class="profiles-banner" aria-labelledby="profilesBannerTitle">
-    <div class="container profiles-banner-inner">
-      <span class="eyebrow">Featured</span>
-      <h2 id="profilesBannerTitle" class="profiles-banner-title">AxM<span class="brand-accent">cam</span>Players</h2>
-      <p class="muted">The roster behind the club — connect directly on Telegram, Snap or their webcam channel.</p>
-    </div>
-  </section>
-
-  <section id="players" class="section players-section">
+  <main class="section">
     <div class="container">
-      <div id="modelsGrid" class="models-grid">
-        <p class="lb-empty">Loading models…</p>
+      <div id="mProfile" class="m-profile">
+        <p class="lb-empty">Loading…</p>
       </div>
     </div>
-  </section>
+  </main>
 
   <div id="modalHost"></div>
   <footer id="footerHost"></footer>
@@ -38,9 +30,11 @@
     import { api } from './js/api.js';
     import { store } from './js/store.js';
     import { initSharedLayout } from './js/layout.js';
+    import { initModelProfile } from './js/model-profile.js';
 
     initSharedLayout({ activePage: 'players' });
     api.me().then(({ user }) => store.set({ user })).catch(() => {});
+    initModelProfile();
   </script>
 </body>
 </html>

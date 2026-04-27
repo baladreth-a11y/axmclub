@@ -1560,3 +1560,295 @@
     #wheel          { width: 320px !important; height: 320px !important; }
   }
 }
+
+/* ==========================================================================
+   DYNAMIC MODELS GALLERY + GENDER BADGES + VERIFY BANNER + PHOTO TOOLS
+   ========================================================================== */
+@layer components {
+  /* Anonymous visitors don't see the signed-in-only top strip. */
+  body.is-anon .top-strip { display: none; }
+
+  /* ---- Models grid (public) ---------------------------------------- */
+  .models-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--space-4);
+  }
+  .models-empty {
+    grid-column: 1 / -1;
+    text-align: center;
+    padding: var(--space-7) var(--space-5);
+    border: 1px dashed var(--line);
+    border-radius: var(--radius-lg);
+    color: var(--muted);
+  }
+  .model-card {
+    --model-brand: var(--gold);
+    position: relative;
+    display: flex; flex-direction: column;
+    background: linear-gradient(180deg, var(--surface-2), var(--surface-1));
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    transition: transform var(--fast), border-color var(--fast), box-shadow var(--fast);
+  }
+  .model-card:hover {
+    transform: translateY(-3px);
+    border-color: var(--model-brand, var(--gold));
+    box-shadow: 0 20px 50px -30px var(--model-brand, var(--gold));
+  }
+  .model-card-link {
+    display: block;
+    color: inherit;
+    text-decoration: none;
+  }
+  .model-photo {
+    position: relative;
+    display: block;
+    width: 100%;
+    aspect-ratio: 4 / 5;
+    background-color: var(--surface-2);
+    background-size: cover;
+    background-position: center;
+  }
+  .model-photo--initial {
+    display: grid; place-items: center;
+    color: rgba(255,255,255,0.85);
+    font-family: 'Playfair Display', Georgia, serif;
+    font-size: clamp(48px, 8vw, 92px);
+    font-weight: 700;
+    background:
+      radial-gradient(circle at 30% 20%, var(--model-brand, var(--gold)), transparent 65%),
+      linear-gradient(180deg, var(--surface-2), var(--surface-1));
+  }
+  .model-photo::after {
+    content: ''; position: absolute; inset: 0;
+    background: linear-gradient(180deg, transparent 50%, rgba(10,12,17,0.85));
+    pointer-events: none;
+  }
+  .model-brand-strip {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    height: 4px;
+    background: var(--model-brand, var(--gold));
+  }
+  .model-head {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: var(--space-2);
+    padding: var(--space-4) var(--space-4) 0;
+  }
+  .model-head h3 {
+    margin: 0;
+    font-size: 22px;
+  }
+  .model-bio {
+    padding: 6px var(--space-4) var(--space-4);
+    margin: 0;
+    font-size: 13px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+  .model-socials {
+    display: flex; gap: var(--space-2); flex-wrap: wrap;
+    padding: 0 var(--space-4) var(--space-4);
+  }
+  .model-socials a {
+    font-size: 12px; padding: 4px 10px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-pill);
+    color: var(--muted);
+    transition: color var(--fast), border-color var(--fast);
+  }
+  .model-socials a:hover {
+    color: var(--model-brand, var(--gold));
+    border-color: var(--model-brand, var(--gold));
+  }
+
+  /* ---- Gender badges (built on the existing .badge base) ---------- */
+  .badge-female      { background: rgba(236, 96, 160, 0.16); color: #ff8fc1; }
+  .badge-male        { background: rgba(96, 158, 236, 0.16); color: #8fbeff; }
+  .badge-crossdresser{ background: var(--accent-soft);       color: var(--accent); }
+  .badge-transsexual { background: rgba(180, 124, 220, 0.18); color: #cfa6ff; }
+
+  /* ---- Verify banner (signed-in but not yet email-verified) ------- */
+  .verify-banner {
+    background: var(--gold-soft);
+    border-bottom: 1px solid var(--line);
+    color: var(--gold-hi);
+    font-size: 14px;
+  }
+  .verify-banner-inner {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: var(--space-3);
+    padding: 10px 0;
+    flex-wrap: wrap;
+  }
+  .verify-banner .btn { padding: 6px 12px; font-size: 12px; }
+
+  /* ---- Model dashboard: main photo + gallery editor --------------- */
+  .photo-main-row {
+    display: grid;
+    grid-template-columns: 160px 1fr;
+    gap: var(--space-4);
+    align-items: center;
+  }
+  .photo-main-preview {
+    position: relative;
+    width: 160px; height: 160px;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    display: grid; place-items: center;
+  }
+  .photo-main-preview img {
+    width: 100%; height: 100%; object-fit: cover;
+  }
+  .photo-main-preview img.hidden { display: none !important; }
+  .photo-main-fallback {
+    color: var(--muted); font-size: 12px;
+    letter-spacing: 0.14em; text-transform: uppercase;
+  }
+  .photo-main-form { display: grid; gap: var(--space-3); }
+  .photo-main-form label,
+  .photo-gallery-form label { display: grid; gap: 6px; font-size: 13px; color: var(--muted); }
+  .photo-main-form input[type="file"],
+  .photo-gallery-form input[type="file"] {
+    background: var(--bg); border: 1px solid var(--line); color: var(--text);
+    border-radius: var(--radius-sm); padding: 8px 10px; font-size: 13px;
+  }
+  .photo-gallery-form {
+    display: flex; gap: var(--space-3); align-items: end;
+    margin-bottom: var(--space-4);
+  }
+  .photo-gallery-form input[type="file"] { flex: 1; }
+  .photo-gallery-title { margin: var(--space-3) 0 var(--space-2); font-size: 18px; }
+  .dash-divider {
+    border: 0; border-top: 1px solid var(--line);
+    margin: var(--space-5) 0 var(--space-4);
+  }
+  .gallery-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: var(--space-3);
+  }
+  .gallery-item {
+    margin: 0; position: relative;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    overflow: hidden;
+    background: var(--bg);
+  }
+  .gallery-item img {
+    width: 100%; aspect-ratio: 1 / 1; object-fit: cover; display: block;
+  }
+  .gallery-item .gallery-remove {
+    position: absolute; top: 6px; right: 6px;
+    padding: 4px 10px; font-size: 11px;
+    background: rgba(10, 12, 17, 0.7);
+    border: 1px solid rgba(255,255,255,0.2);
+    color: var(--text);
+  }
+  .gallery-item .gallery-remove:hover {
+    border-color: var(--danger); color: var(--danger);
+  }
+
+  /* ---- m.html (public per-model profile) -------------------------- */
+  .m-profile { max-width: 920px; margin-inline: auto; }
+  .m-profile-card {
+    --model-brand: var(--gold);
+    background: linear-gradient(180deg, var(--surface-2), var(--surface-1));
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+  }
+  .m-profile-head {
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    gap: var(--space-5);
+    padding: var(--space-5);
+    align-items: center;
+  }
+  .m-profile-photo {
+    width: 240px; height: 300px; object-fit: cover;
+    border-radius: var(--radius);
+    border: 1px solid var(--line);
+  }
+  .m-profile-photo--initial {
+    display: grid; place-items: center;
+    color: rgba(255,255,255,0.85);
+    font-family: 'Playfair Display', Georgia, serif;
+    font-size: 96px;
+    background:
+      radial-gradient(circle at 30% 20%, var(--model-brand), transparent 65%),
+      linear-gradient(180deg, var(--surface-2), var(--surface-1));
+  }
+  .m-profile-ident h1 {
+    margin: var(--space-2) 0 var(--space-3);
+    font-size: clamp(32px, 4vw, 44px);
+  }
+  .m-profile-bio {
+    color: var(--text); font-size: 15px;
+    margin: var(--space-3) 0;
+  }
+  .m-profile-socials {
+    display: flex; gap: var(--space-2); flex-wrap: wrap;
+    margin-top: var(--space-3);
+  }
+  .m-profile-section {
+    padding: 0 var(--space-5) var(--space-5);
+    border-top: 1px solid var(--line);
+  }
+  .m-profile-section h2 {
+    margin: var(--space-5) 0 var(--space-4);
+  }
+  .m-profile-gallery {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: var(--space-3);
+  }
+  .m-profile-gallery a {
+    display: block;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    overflow: hidden;
+    transition: border-color var(--fast);
+  }
+  .m-profile-gallery a:hover { border-color: var(--model-brand, var(--gold)); }
+  .m-profile-gallery img {
+    width: 100%; aspect-ratio: 1 / 1; object-fit: cover; display: block;
+  }
+
+  .m-profile-gate {
+    max-width: 560px; margin-inline: auto;
+    text-align: center;
+    background: linear-gradient(180deg, var(--surface-2), var(--surface-1));
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    padding: var(--space-7) var(--space-6);
+  }
+  .m-profile-gate h1 { margin: var(--space-2) 0 var(--space-3); }
+  .m-profile-gate-actions {
+    display: flex; gap: var(--space-3); justify-content: center;
+    flex-wrap: wrap; margin-top: var(--space-5);
+  }
+}
+
+@layer responsive {
+  @media (max-width: 1024px) {
+    .models-grid     { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .photo-main-row  { grid-template-columns: 140px 1fr; }
+    .photo-main-preview { width: 140px; height: 140px; }
+    .m-profile-head  { grid-template-columns: 1fr; text-align: center; }
+    .m-profile-photo { width: 220px; height: 280px; margin-inline: auto; }
+  }
+  @media (max-width: 720px) {
+    .models-grid     { grid-template-columns: 1fr; }
+    .photo-main-row  { grid-template-columns: 1fr; text-align: center; }
+    .photo-main-preview { margin-inline: auto; }
+    .photo-gallery-form { flex-direction: column; align-items: stretch; }
+    .verify-banner-inner { flex-direction: column; align-items: stretch; text-align: center; }
+  }
+}

@@ -104,6 +104,27 @@ try {
   Ok 'Weak password returns 400' ($weakCode -eq 400) ('got ' + $weakCode)
 
   Write-Host ""
+  Write-Host "== 10. Public model gallery + email verification ==" -ForegroundColor Cyan
+  Ok 'GET / contains #modelsGrid placeholder'   ($html.Content -match 'id="modelsGrid"')
+  $playersHtml = Invoke-WebRequest -Uri ($Base + '/players.html') -UseBasicParsing
+  Ok 'GET /players.html contains #modelsGrid'   ($playersHtml.Content -match 'id="modelsGrid"')
+
+  $mHtml = Invoke-WebRequest -Uri ($Base + '/m.html') -UseBasicParsing
+  Ok 'GET /m.html returns 200'                  ($mHtml.StatusCode -eq 200)
+  Ok 'm.html has #mProfile placeholder'         ($mHtml.Content -match 'id="mProfile"')
+
+  $publicModels = Invoke-RestMethod -Uri ($Base + '/api/models')
+  Ok '/api/models returns models array (anon)'  ($null -ne $publicModels.models)
+
+  $anonProfCode = 0
+  try { $null = Invoke-RestMethod -Uri ($Base + '/api/models/anything') } catch { $anonProfCode = Code $_ }
+  Ok 'Anonymous /api/models/{slug} returns 401 or 404' ($anonProfCode -in @(401,404)) ('got ' + $anonProfCode)
+
+  $samMe = Invoke-RestMethod -Uri ($Base + '/api/me') -WebSession $sess
+  Ok 'New supporter is unverified by default'   ($samMe.user.emailVerified -eq $false)
+  Ok 'Public-User exposes slug field'           ($null -ne $samMe.user.slug)
+
+  Write-Host ""
   Write-Host ("== Manual verify summary: " + $pass + ' passed, ' + $fail + ' failed ==') -ForegroundColor $(if ($fail) { 'Red' } else { 'Green' })
 }
 finally {

@@ -13,14 +13,167 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Web -ErrorAction SilentlyContinue
+# Compiled multipart/form-data parser. PowerShell 5.1's binding/coercion
+# of `byte[]` through script-level operations is unreliable for binary
+# search (boundary-finding falls back to byte-by-byte comparisons that
+# silently fail). The whole parser therefore lives in straight C#.
+try {
+  Add-Type -TypeDefinition @"
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Text;
+using System.Text.RegularExpressions;
+
+public class AxmPart {
+    public string Name;
+    public string Filename;
+    public string ContentType;
+    public byte[] Bytes;
+}
+
+public static class AxmMultipart {
+    static int IndexOf(byte[] hay, byte[] needle, int start) {
+        if (hay == null || needle == null) return -1;
+        if (needle.Length == 0) return start;
+        int max = hay.Length - needle.Length;
+        for (int i = start; i <= max; i++) {
+            bool ok = true;
+            for (int j = 0; j < needle.Length; j++) {
+                if (hay[i + j] != needle[j]) { ok = false; break; }
+            }
+            if (ok) return i;
+        }
+        return -1;
+    }
+
+    static string GetDispositionParam(string headerLine, string key) {
+        Match m = Regex.Match(
+            headerLine,
+            @"(?:^|;\s*)" + Regex.Escape(key) + @"=(?:""([^""]*)""|([^;\r\n]+))",
+            RegexOptions.IgnoreCase
+        );
+        if (!m.Success) return "";
+        string value = m.Groups[1].Success ? m.Groups[1].Value : m.Groups[2].Value.Trim();
+        if (key.Equals("filename*", StringComparison.OrdinalIgnoreCase)) {
+            int marker = value.IndexOf("''", StringComparison.Ordinal);
+            if (marker >= 0) value = value.Substring(marker + 2);
+            try { value = Uri.UnescapeDataString(value); } catch {}
+        }
+        return value;
+    }
+
+    public static AxmPart[] Parse(byte[] body, string boundary) {
+        if (body == null || body.Length == 0) return new AxmPart[0];
+        if (string.IsNullOrEmpty(boundary)) return null;
+        byte[] delim = Encoding.ASCII.GetBytes("--" + boundary);
+        byte[] crlfCrlf = new byte[] { 13, 10, 13, 10 };
+        List<int> positions = new List<int>();
+        int idx = 0;
+        while (true) {
+            int next = IndexOf(body, delim, idx);
+            if (next < 0) break;
+            positions.Add(next);
+            idx = next + delim.Length;
+        }
+        if (positions.Count < 2) return null;
+        List<AxmPart> parts = new List<AxmPart>();
+        for (int k = 0; k < positions.Count - 1; k++) {
+            int start = positions[k] + delim.Length;
+            // Trailing '--' marks the closing boundary; skip that part.
+            if (start + 1 < body.Length && body[start] == 45 && body[start + 1] == 45) continue;
+            if (start + 1 < body.Length && body[start] == 13 && body[start + 1] == 10) start += 2;
+            int end = positions[k + 1];
+            while (end > start && (body[end - 1] == 13 || body[end - 1] == 10)) end--;
+            if (end <= start) continue;
+            int hdrEnd = IndexOf(body, crlfCrlf, start);
+            if (hdrEnd < 0 || hdrEnd > end) continue;
+            string hdrText = Encoding.ASCII.GetString(body, start, hdrEnd - start);
+            int bodyStart = hdrEnd + 4;
+            int bodyLen = end - bodyStart;
+            if (bodyLen < 0) bodyLen = 0;
+            byte[] partBytes = new byte[bodyLen];
+            if (bodyLen > 0) Buffer.BlockCopy(body, bodyStart, partBytes, 0, bodyLen);
+            string name = "", filename = "", ctype = "";
+            foreach (string line in hdrText.Split(new string[] { "\r\n" }, StringSplitOptions.None)) {
+                if (line.StartsWith("Content-Disposition:", StringComparison.OrdinalIgnoreCase)) {
+                    name = GetDispositionParam(line, "name");
+                    filename = GetDispositionParam(line, "filename");
+                    if (string.IsNullOrEmpty(filename)) filename = GetDispositionParam(line, "filename*");
+                } else if (line.StartsWith("Content-Type:", StringComparison.OrdinalIgnoreCase)) {
+                    ctype = line.Substring("Content-Type:".Length).Trim();
+                }
+            }
+            AxmPart p = new AxmPart();
+            p.Name = name; p.Filename = filename; p.ContentType = ctype; p.Bytes = partBytes;
+            parts.Add(p);
+        }
+        return parts.ToArray();
+    }
+
+    // Read up to maxBytes from a stream into a fresh byte[] without any
+    // PowerShell-side allocations / boxing.
+    public static byte[] ReadAll(Stream input, long maxBytes) {
+        MemoryStream ms = new MemoryStream();
+        byte[] buf = new byte[8192];
+        while (true) {
+            int n = input.Read(buf, 0, buf.Length);
+            if (n <= 0) break;
+            if (ms.Length + n > maxBytes) return null;
+            ms.Write(buf, 0, n);
+        }
+        return ms.ToArray();
+    }
+
+    // Stream-based entry point. Combines reading the body and parsing it,
+    // so the raw byte[] never has to round-trip through a PowerShell
+    // variable (where PS 5.1 was silently stringifying it). Returns:
+    //   ParseResult.TooLarge=true    -> client exceeded maxBytes (413)
+    //   ParseResult.Parts==null      -> malformed multipart (also 413)
+    //   ParseResult.Parts.Length==0  -> empty body (treated as no parts)
+    public static AxmParseResult ParseStream(Stream input, long maxBytes, string boundary) {
+        AxmParseResult r = new AxmParseResult();
+        byte[] body = ReadAll(input, maxBytes);
+        if (body == null) { r.TooLarge = true; return r; }
+        r.Parts = Parse(body, boundary);
+        return r;
+    }
+}
+
+public class AxmParseResult {
+    public bool TooLarge;
+    public AxmPart[] Parts;
+}
+"@
+  Write-Host "[boot] AxmMultipart type loaded" -ForegroundColor DarkGray
+} catch {
+  Write-Host "[boot] AxmMultipart Add-Type FAILED: $_" -ForegroundColor Red
+}
 
 # ---------- Paths ----------
 $Root    = Split-Path -Parent $MyInvocation.MyCommand.Path
 $DataDir = Join-Path $Root 'data'
 $DbPath  = Join-Path $DataDir 'db.json'
-if (-not (Test-Path $DataDir)) { New-Item -ItemType Directory $DataDir | Out-Null }
+$UploadsDir = Join-Path $Root 'uploads'
+if (-not (Test-Path $DataDir))    { New-Item -ItemType Directory $DataDir    | Out-Null }
+if (-not (Test-Path $UploadsDir)) { New-Item -ItemType Directory $UploadsDir | Out-Null }
 
 $Script:DbLock = New-Object object
+# Make $Port reachable from helpers like Send-VerifyEmail without
+# requiring it to be passed around. Set after the param block runs.
+$Script:Port = $Port
+# Upload limits / allowed mime types are referenced by the upload handler.
+$Script:UploadMaxBytes = 10485760  # 10 MB
+$Script:UploadMimeTypes = @{
+  'image/jpeg' = '.jpg'
+  'image/png'  = '.png'
+  'image/webp' = '.webp'
+  'image/gif'  = '.gif'
+}
+$Script:GenderValues = @('male','female','crossdresser','transsexual')
+$Script:GalleryMax   = 12
+$Script:VerifyTtlMs  = 24 * 60 * 60 * 1000  # 24h
 
 # ---------- Helpers ----------
 function ConvertTo-Hashtable {
@@ -188,6 +341,64 @@ function Get-Tier($points) {
   return @{ name='Silver'; bonus=0.0 }
 }
 
+# Slugify a display name into a URL-safe lower-kebab string.
+# Strips any non-alphanumeric characters, collapses runs of '-',
+# trims to 48 chars. Returns 'model' if the result would be empty.
+function Slugify([string]$s) {
+  if (-not $s) { return 'model' }
+  $lower = $s.ToLowerInvariant()
+  $kebab = [regex]::Replace($lower, '[^a-z0-9]+', '-')
+  $kebab = $kebab.Trim('-')
+  if ($kebab.Length -eq 0) { return 'model' }
+  if ($kebab.Length -gt 48) { $kebab = $kebab.Substring(0, 48).Trim('-') }
+  if ($kebab.Length -eq 0) { return 'model' }
+  return $kebab
+}
+
+# Generate a unique slug for a user from their display name. If a
+# different user already owns the same slug, suffix '-2', '-3', etc.
+function Ensure-Slug($db, $u) {
+  if ($u.slug) { return [string]$u.slug }
+  $base = Slugify $u.name
+  $candidate = $base
+  $n = 2
+  while ($true) {
+    $taken = $false
+    foreach ($otherEmail in $db.users.Keys) {
+      $other = $db.users[$otherEmail]
+      if ($other -ne $u -and ($other.slug -eq $candidate)) { $taken = $true; break }
+    }
+    if (-not $taken) { break }
+    $candidate = $base + '-' + $n
+    $n++
+    if ($n -gt 99) { $candidate = $base + '-' + (Get-Random -Minimum 100 -Maximum 9999); break }
+  }
+  $u.slug = $candidate
+  return $candidate
+}
+
+# Validate / canonicalize a gender string. Returns the lower-cased
+# gender if it is in the allowed set; otherwise returns $null.
+function Validate-Gender($v) {
+  if ($null -eq $v) { return $null }
+  $g = ([string]$v).Trim().ToLowerInvariant()
+  if ($g -eq '') { return '' }
+  if ($Script:GenderValues -contains $g) { return $g }
+  return $null
+}
+
+# Look up a user by either email or slug (case-insensitive).
+function Get-ModelByEmailOrSlug($db, [string]$key) {
+  if (-not $key) { return $null }
+  $k = $key.ToLowerInvariant()
+  if ($db.users.ContainsKey($k)) { return $db.users[$k] }
+  foreach ($email in $db.users.Keys) {
+    $u = $db.users[$email]
+    if ($u.slug -and ([string]$u.slug).ToLowerInvariant() -eq $k) { return $u }
+  }
+  return $null
+}
+
 function Public-User($u) {
   if (-not $u) { return $null }
   $redCount = 0
@@ -207,6 +418,16 @@ function Public-User($u) {
   if ($u.bio) { $bio = [string]$u.bio }
   $brand = ''
   if ($u.brandColor) { $brand = [string]$u.brandColor }
+  $gender = ''
+  if ($u.gender) { $gender = [string]$u.gender }
+  $photo = ''
+  if ($u.photoUrl) { $photo = [string]$u.photoUrl }
+  $slug = ''
+  if ($u.slug) { $slug = [string]$u.slug }
+  $verified = $false
+  if ($u.emailVerified) { $verified = [bool]$u.emailVerified }
+  $galleryCount = 0
+  if ($u.gallery) { $galleryCount = @($u.gallery).Count }
   $socials = @{ telegram = ''; snap = ''; webcam = ''; fansite = '' }
   if ($u.socials) {
     foreach ($k in @('telegram','snap','webcam','fansite')) {
@@ -230,7 +451,74 @@ function Public-User($u) {
     bio            = $bio
     brandColor     = $brand
     socials        = $socials
+    gender         = $gender
+    photoUrl       = $photo
+    slug           = $slug
+    emailVerified  = $verified
+    galleryCount   = $galleryCount
   }
+}
+
+# Public model card. Strips PII / scoring info that supporters don't need.
+# Used by GET /api/models (no auth) and to compose the detail payload.
+function Public-Model($u) {
+  if (-not $u) { return $null }
+  $gender = ''
+  if ($u.gender) { $gender = [string]$u.gender }
+  $photo = ''
+  if ($u.photoUrl) { $photo = [string]$u.photoUrl }
+  $slug = ''
+  if ($u.slug) { $slug = [string]$u.slug }
+  $bio = ''
+  if ($u.bio) { $bio = [string]$u.bio }
+  $brand = ''
+  if ($u.brandColor) { $brand = [string]$u.brandColor }
+  $socials = @{ telegram = ''; snap = ''; webcam = ''; fansite = '' }
+  if ($u.socials) {
+    foreach ($k in @('telegram','snap','webcam','fansite')) {
+      if ($u.socials[$k]) { $socials[$k] = [string]$u.socials[$k] }
+    }
+  }
+  $galleryCount = 0
+  if ($u.gallery) { $galleryCount = @($u.gallery).Count }
+  return @{
+    slug         = $slug
+    name         = [string]$u.name
+    gender       = $gender
+    photoUrl     = $photo
+    bio          = $bio
+    brandColor   = $brand
+    socials      = $socials
+    galleryCount = $galleryCount
+    joined       = [long]$u.joined
+  }
+}
+
+# Public model with full gallery. Returned only to verified, signed-in users.
+function Public-Model-Detail($u) {
+  $base = Public-Model $u
+  $gallery = @()
+  if ($u.gallery) {
+    foreach ($g in @($u.gallery)) {
+      $url = ''
+      if ($g.url) { $url = [string]$g.url }
+      $at  = 0
+      if ($g.addedAt) { $at = [long]$g.addedAt }
+      $gallery += @{ url = $url; addedAt = $at }
+    }
+  }
+  $base.gallery = $gallery
+  return $base
+}
+
+# Resolve the on-disk uploads directory for a model and create it on demand.
+# Returns the absolute path. Caller is expected to write under it; the
+# path-traversal guard in Handle-Request still protects the rest of the tree.
+function Get-ModelUploadDir([string]$slug) {
+  if (-not $slug) { $slug = 'misc' }
+  $dir = Join-Path (Join-Path $UploadsDir 'models') $slug
+  if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+  return $dir
 }
 
 # ---------- Response helpers ----------
@@ -257,11 +545,26 @@ function Send-Static($resp, $fullPath) {
     '.json' { 'application/json; charset=utf-8' }
     '.svg'  { 'image/svg+xml' }
     '.png'  { 'image/png' }
+    '.jpg'  { 'image/jpeg' }
+    '.jpeg' { 'image/jpeg' }
+    '.webp' { 'image/webp' }
+    '.gif'  { 'image/gif' }
     '.ico'  { 'image/x-icon' }
     default { 'application/octet-stream' }
   }
   $bytes = [IO.File]::ReadAllBytes($fullPath)
   $resp.ContentType = $mime
+  $resp.ContentLength64 = $bytes.Length
+  $resp.OutputStream.Write($bytes, 0, $bytes.Length)
+  $resp.OutputStream.Close()
+}
+
+# Send a plain HTML response. Used by the verification confirm endpoint
+# which returns a tiny landing page rather than a JSON payload.
+function Send-Html($resp, [string]$html, [int]$status = 200) {
+  $resp.StatusCode = $status
+  $resp.ContentType = 'text/html; charset=utf-8'
+  $bytes = [Text.Encoding]::UTF8.GetBytes($html)
   $resp.ContentLength64 = $bytes.Length
   $resp.OutputStream.Write($bytes, 0, $bytes.Length)
   $resp.OutputStream.Close()
@@ -274,6 +577,94 @@ function Read-JsonBody($req) {
   $reader.Close()
   if ([string]::IsNullOrWhiteSpace($body)) { return @{} }
   try { return ConvertTo-Hashtable ($body | ConvertFrom-Json) } catch { return @{} }
+}
+
+# Minimal multipart/form-data parser. Returns an array of hashtables
+# @{ name=; filename=; contentType=; bytes= } — one entry per part.
+# Returns $null on malformed input; caller decides how to respond.
+#
+# The actual byte-search and part-splitting happens in the compiled
+# C# helper [AxmMultipart] (see top of file). Doing it in pure
+# PowerShell on Windows PowerShell 5.1 is unreliable because byte[]
+# arrays end up boxed through PSObject in non-obvious ways.
+function Read-MultipartParts($req, [long]$maxBytes = 11534336) {
+  $ct = [string]$req.ContentType
+  if (-not $ct -or $ct -notmatch 'multipart/form-data') { return $null }
+  $m = [regex]::Match($ct, 'boundary=(?:"([^"]+)"|([^;\s]+))')
+  if (-not $m.Success) { return $null }
+  $boundary = $m.Groups[1].Value
+  if (-not $boundary) { $boundary = $m.Groups[2].Value }
+
+  if (-not $req.HasEntityBody) { return @() }
+  $declared = [long]$req.ContentLength64
+  if ($declared -gt $maxBytes) { return $null }
+
+  # Hand the stream straight to the compiled helper so the body bytes
+  # never live in a PowerShell variable. Doing otherwise gives PS 5.1
+  # a chance to silently stringify the byte[] on its way back through.
+  Write-Host ("[mp] ParseStream declared=" + $declared + " boundary=" + $boundary) -ForegroundColor Magenta
+  $result = [AxmMultipart]::ParseStream($req.InputStream, $maxBytes, $boundary)
+  if ($null -eq $result) { Write-Host "[mp] ParseStream returned null result" -ForegroundColor Red; return $null }
+  $partInfo = 'null'
+  if ($null -ne $result.Parts) { $partInfo = [string]$result.Parts.Length }
+  Write-Host ("[mp] ParseStream tooLarge=" + $result.TooLarge + " parts=" + $partInfo) -ForegroundColor Magenta
+  if ($result.TooLarge) { return $null }
+  if ($null -eq $result.Parts) { return $null }
+
+  # Translate the C# AxmPart[] into a hashtable list so the rest of the
+  # PowerShell code keeps its case-insensitive .name / .filename / .bytes
+  # idiom.
+  $parts = @()
+  foreach ($p in $result.Parts) {
+    $parts += @{
+      name        = [string]$p.Name
+      filename    = [string]$p.Filename
+      contentType = [string]$p.ContentType
+      bytes       = $p.Bytes
+    }
+  }
+  return ,$parts
+}
+
+# Send a verification email or, if no SMTP is configured, fall back to
+# writing the link to stdout with a [verify-link] prefix. The e2e test
+# harness scrapes the captured stdout for this prefix to extract the
+# token without needing a real SMTP server.
+function Send-VerifyEmail([string]$toEmail, [string]$toName, [string]$token) {
+  $base = $env:AURUM_BASE_URL
+  if (-not $base) { $base = "http://localhost:$($Script:Port)" }
+  $link = $base.TrimEnd('/') + '/api/verify/confirm?token=' + [uri]::EscapeDataString($token)
+
+  $smtpHost = $env:AURUM_SMTP_HOST
+  if (-not $smtpHost) {
+    Write-Host "[verify-link] $toEmail $link" -ForegroundColor Yellow
+    return
+  }
+
+  try {
+    $smtpPort = 587
+    if ($env:AURUM_SMTP_PORT) { $smtpPort = [int]$env:AURUM_SMTP_PORT }
+    $from = $env:AURUM_SMTP_FROM
+    if (-not $from) { $from = 'no-reply@axmclub.com' }
+
+    $client = New-Object System.Net.Mail.SmtpClient($smtpHost, $smtpPort)
+    $client.EnableSsl = $true
+    if ($env:AURUM_SMTP_USER -and $env:AURUM_SMTP_PASS) {
+      $client.Credentials = New-Object System.Net.NetworkCredential($env:AURUM_SMTP_USER, $env:AURUM_SMTP_PASS)
+    }
+
+    $msg = New-Object System.Net.Mail.MailMessage
+    $msg.From = New-Object System.Net.Mail.MailAddress($from, 'AxMclub')
+    $msg.To.Add((New-Object System.Net.Mail.MailAddress($toEmail, $toName)))
+    $msg.Subject = 'Verify your AxMclub email'
+    $msg.Body    = "Hi $toName,`r`n`r`nConfirm your email to view model profiles on AxMclub:`r`n$link`r`n`r`nThe link expires in 24 hours."
+    $msg.IsBodyHtml = $false
+    $client.Send($msg)
+    $msg.Dispose(); $client.Dispose()
+  } catch {
+    Write-Host "WARN: failed to send verify email to ${toEmail}: $_" -ForegroundColor Yellow
+    Write-Host "[verify-link] $toEmail $link" -ForegroundColor Yellow
+  }
 }
 
 function Get-SessionUser($req, $db) {
@@ -385,18 +776,26 @@ function Handle-Auth($req, $resp, $db, $path, $method) {
       $salt = New-Salt
       $hash = Hash-Password $password $salt
       $db.users[$email] = @{
-        name        = $name
-        email       = $email
-        pwSalt      = $salt
-        pwHash      = $hash
-        points      = 0
-        tokens      = 0
-        rank        = ''
-        offers      = @()
-        lastSpin    = 0
-        joined      = NowMs
-        accountType = $accountType
+        name          = $name
+        email         = $email
+        pwSalt        = $salt
+        pwHash        = $hash
+        points        = 0
+        tokens        = 0
+        rank          = ''
+        offers        = @()
+        lastSpin      = 0
+        joined        = NowMs
+        accountType   = $accountType
+        emailVerified = $false
+        gallery       = @()
+        gender        = ''
+        photoUrl      = ''
+        bio           = ''
+        brandColor    = ''
+        socials       = @{ telegram=''; snap=''; webcam=''; fansite='' }
       }
+      Ensure-Slug $db $db.users[$email] | Out-Null
       $db.stats.members = [int]$db.stats.members + 1
       $sid = New-Token
       $db.sessions[$sid] = $email
@@ -881,10 +1280,33 @@ function Handle-Model($req, $resp, $db, $path, $method) {
         }
         $changes.socials = $u.socials
       }
+      # Gender (one of male|female|crossdresser|transsexual or empty).
+      if ($body.PSObject.Properties['gender'] -or $body.ContainsKey('gender')) {
+        $g = Validate-Gender $body.gender
+        if ($null -eq $g) {
+          Send-Json $resp @{ error = 'Invalid gender. Allowed: male, female, crossdresser, transsexual.' } 400
+          return $true
+        }
+        $u.gender = $g
+        $changes.gender = $g
+      }
+      # photoUrl (empty, https://..., or /uploads/models/...).
+      if ($body.PSObject.Properties['photoUrl'] -or $body.ContainsKey('photoUrl')) {
+        $newPhoto = ("$($body.photoUrl)").Trim()
+        if ($newPhoto -eq '' -or $newPhoto -match '^https://' -or $newPhoto -match '^/uploads/models/') {
+          $u.photoUrl = $newPhoto
+          $changes.photoUrl = $newPhoto
+        } else {
+          Send-Json $resp @{ error = 'photoUrl must be empty, an https URL, or /uploads/models/...' } 400
+          return $true
+        }
+      }
       if ($changes.Keys.Count -eq 0) {
         Send-Json $resp @{ error = 'No valid fields to update.' } 400
         return $true
       }
+      # Ensure the model has a slug for outbound public links.
+      Ensure-Slug $db $u | Out-Null
       Save-Db $db
       Send-Json $resp @{ ok = $true; changes = $changes; user = (Public-User $u) }
       return $true
@@ -1294,6 +1716,280 @@ function Handle-Admin($req, $resp, $db, $path, $method) {
       Send-Json $resp @{ ok = $true; email = $email; sessionsDropped = $deadSids.Count }
       return $true
     }
+
+    'POST /api/admin/users/verify' {
+      if (-not (Require-Admin $req $resp)) { return $true }
+      $body = Read-JsonBody $req
+      $email = ("$($body.email)").Trim().ToLower()
+      if (-not $db.users.ContainsKey($email)) {
+        Send-Json $resp @{ error = 'User not found.' } 404
+        return $true
+      }
+      $u = $db.users[$email]
+      $u.emailVerified = $true
+      $u.verifyToken = ''
+      $u.verifyTokenExpires = 0
+      Save-Db $db
+      Send-Json $resp @{ ok = $true; email = $email; user = (Public-User $u) }
+      return $true
+    }
+  }
+  return $false
+}
+
+# ---- Public model gallery: list + slug detail (verification gated) -----
+# These endpoints power the dynamic Players grid on / and /players.html.
+# Anonymous visitors can browse the cards (Public-Model strips PII), but
+# the per-model detail view (gallery + full bio) requires the caller to be
+# signed in AND have emailVerified == $true.
+function Handle-Models($req, $resp, $db, $path, $method) {
+  if ("$method $path" -eq 'GET /api/models') {
+    $list = @()
+    foreach ($email in $db.users.Keys) {
+      $u = $db.users[$email]
+      $acct = ''
+      if ($u.accountType) { $acct = [string]$u.accountType }
+      if ($acct -ne 'model') { continue }
+      Ensure-Slug $db $u | Out-Null
+      $list += (Public-Model $u)
+    }
+    $list = @($list | Sort-Object -Property { [long]$_.joined } -Descending)
+    Send-Json $resp @{ models = @($list); count = @($list).Count }
+    return $true
+  }
+
+  if ($method -eq 'GET' -and $path -like '/api/models/*') {
+    $slug = $path.Substring('/api/models/'.Length)
+    if ($slug.Contains('/')) { $slug = $slug.Split('/')[0] }
+    if (-not $slug) {
+      Send-Json $resp @{ error = 'Model slug required.' } 404
+      return $true
+    }
+    $target = Get-ModelByEmailOrSlug $db $slug
+    if (-not $target -or ([string]$target.accountType) -ne 'model') {
+      Send-Json $resp @{ error = 'Model not found.' } 404
+      return $true
+    }
+    $s = Get-SessionUser $req $db
+    if (-not $s) {
+      Send-Json $resp @{ error = 'Sign in required.'; reason = 'sign-in' } 401
+      return $true
+    }
+    $viewer = $s.user
+    $verified = $false
+    if ($viewer.emailVerified) { $verified = [bool]$viewer.emailVerified }
+    # The model can view their own profile without verifying; everyone else
+    # has to confirm their email first.
+    if (-not $verified -and ([string]$viewer.email) -ne ([string]$target.email)) {
+      Send-Json $resp @{ error = 'Verify your email to view model profiles.'; reason = 'verify-email' } 403
+      return $true
+    }
+    Send-Json $resp @{ model = (Public-Model-Detail $target) }
+    return $true
+  }
+
+  return $false
+}
+
+# ---- Email verification: start / confirm -------------------------------
+function Handle-Verify($req, $resp, $db, $path, $method) {
+  if ("$method $path" -eq 'POST /api/verify/start') {
+    $u = Require-Auth $req $resp $db
+    if (-not $u) { return $true }
+    if ($u.emailVerified) {
+      Send-Json $resp @{ ok = $true; alreadyVerified = $true }
+      return $true
+    }
+    $token = New-Token
+    $u.verifyToken = $token
+    $u.verifyTokenExpires = (NowMs) + $Script:VerifyTtlMs
+    Save-Db $db
+    Send-VerifyEmail $u.email $u.name $token
+    Send-Json $resp @{ ok = $true; sent = $true }
+    return $true
+  }
+
+  if ("$method $path" -eq 'GET /api/verify/confirm') {
+    $token = ''
+    if ($req.Url.Query) {
+      $q = [System.Web.HttpUtility]::ParseQueryString($req.Url.Query)
+      $token = [string]$q['token']
+    }
+    $foundUser = $null
+    if ($token) {
+      foreach ($email in $db.users.Keys) {
+        $u = $db.users[$email]
+        if ($u.verifyToken -and ([string]$u.verifyToken) -eq $token) { $foundUser = $u; break }
+      }
+    }
+    if (-not $foundUser) {
+      $html = '<!doctype html><meta charset="utf-8"><title>Link invalid</title>' +
+              '<body style="font-family:Inter,system-ui,sans-serif;background:#0a0c11;color:#eef1f6;padding:48px;text-align:center">' +
+              '<h1 style="font-family:Playfair Display,serif;color:#d4af6a">Link invalid or expired</h1>' +
+              '<p>Please request a new verification email from your account.</p>' +
+              '<p><a href="/" style="color:#d4af6a">Back to AxMclub</a></p></body>'
+      Send-Html $resp $html 400
+      return $true
+    }
+    $now = NowMs
+    $exp = 0
+    if ($foundUser.verifyTokenExpires) { $exp = [long]$foundUser.verifyTokenExpires }
+    if ($exp -gt 0 -and $exp -lt $now) {
+      $foundUser.verifyToken = ''
+      $foundUser.verifyTokenExpires = 0
+      Save-Db $db
+      $html = '<!doctype html><meta charset="utf-8"><title>Link expired</title>' +
+              '<body style="font-family:Inter,system-ui,sans-serif;background:#0a0c11;color:#eef1f6;padding:48px;text-align:center">' +
+              '<h1 style="font-family:Playfair Display,serif;color:#d4af6a">Link expired</h1>' +
+              '<p>Please sign in and request a new verification email.</p>' +
+              '<p><a href="/" style="color:#d4af6a">Back to AxMclub</a></p></body>'
+      Send-Html $resp $html 400
+      return $true
+    }
+    $foundUser.emailVerified = $true
+    $foundUser.verifyToken = ''
+    $foundUser.verifyTokenExpires = 0
+    Save-Db $db
+    $html = '<!doctype html><meta charset="utf-8"><title>Email verified</title>' +
+            '<body style="font-family:Inter,system-ui,sans-serif;background:#0a0c11;color:#eef1f6;padding:48px;text-align:center">' +
+            '<h1 style="font-family:Playfair Display,serif;color:#d4af6a">Email verified</h1>' +
+            '<p>You can now view model profiles on AxMclub.</p>' +
+            '<p><a href="/?verified=1" style="color:#d4af6a;font-weight:600">Continue to AxMclub</a></p></body>'
+    Send-Html $resp $html 200
+    return $true
+  }
+  return $false
+}
+
+# ---- Photo uploads (model-only, multipart): main photo + gallery -------
+function Handle-Uploads($req, $resp, $db, $path, $method) {
+  $key = "$method $path"
+  switch ($key) {
+
+    'POST /api/model/photo' {
+      $u = Require-Model $req $resp $db
+      if (-not $u) { return $true }
+      $parts = Read-MultipartParts $req ($Script:UploadMaxBytes + 1048576)
+
+      if ($null -eq $parts) {
+        Send-Json $resp @{ error = 'Upload too large or malformed (10 MB max).' } 413
+
+        return $true
+      }
+      $photoPart = $null
+      foreach ($p in $parts) {
+        if ($p.name -eq 'photo' -and $p.filename) { $photoPart = $p; break }
+      }
+      if (-not $photoPart) {
+        Send-Json $resp @{ error = 'photo field is required.' } 400
+        return $true
+      }
+      if (-not $Script:UploadMimeTypes.ContainsKey($photoPart.contentType)) {
+        Send-Json $resp @{ error = ('Unsupported type: ' + $photoPart.contentType) } 415
+        return $true
+      }
+      if (@($photoPart.bytes).Count -gt $Script:UploadMaxBytes) {
+        Send-Json $resp @{ error = 'Photo exceeds 10 MB.' } 413
+
+        return $true
+      }
+      $ext = $Script:UploadMimeTypes[$photoPart.contentType]
+      $slug = Ensure-Slug $db $u
+      $dir = Get-ModelUploadDir $slug
+      # Remove any prior main.* file so the URL keeps a stable name with new ext.
+      foreach ($prior in Get-ChildItem -Path $dir -Filter 'main.*' -ErrorAction SilentlyContinue) {
+        try { Remove-Item -Force $prior.FullName -ErrorAction SilentlyContinue } catch {}
+      }
+      $filePath = Join-Path $dir ('main' + $ext)
+      [IO.File]::WriteAllBytes($filePath, $photoPart.bytes)
+      $u.photoUrl = '/uploads/models/' + $slug + '/main' + $ext
+      Save-Db $db
+      Send-Json $resp @{ ok = $true; photoUrl = $u.photoUrl; user = (Public-User $u) }
+      return $true
+    }
+
+    'POST /api/model/gallery/add' {
+      $u = Require-Model $req $resp $db
+      if (-not $u) { return $true }
+      if (-not $u.gallery) { $u.gallery = @() }
+      if (@($u.gallery).Count -ge $Script:GalleryMax) {
+        Send-Json $resp @{ error = ('Gallery is full (max ' + $Script:GalleryMax + ').') } 409
+        return $true
+      }
+      $parts = Read-MultipartParts $req ($Script:UploadMaxBytes + 1048576)
+      if ($null -eq $parts) {
+        Send-Json $resp @{ error = 'Upload too large or malformed (10 MB max).' } 413
+        return $true
+      }
+      $photoPart = $null
+      foreach ($p in $parts) {
+        if ($p.name -eq 'photo' -and $p.filename) { $photoPart = $p; break }
+      }
+      if (-not $photoPart) {
+        Send-Json $resp @{ error = 'photo field is required.' } 400
+        return $true
+      }
+      if (-not $Script:UploadMimeTypes.ContainsKey($photoPart.contentType)) {
+        Send-Json $resp @{ error = ('Unsupported type: ' + $photoPart.contentType) } 415
+        return $true
+      }
+      if (@($photoPart.bytes).Count -gt $Script:UploadMaxBytes) {
+        Send-Json $resp @{ error = 'Photo exceeds 10 MB.' } 413
+        return $true
+      }
+      $ext = $Script:UploadMimeTypes[$photoPart.contentType]
+      $slug = Ensure-Slug $db $u
+      $dir = Get-ModelUploadDir $slug
+      $now = NowMs
+      $idx = (@($u.gallery).Count + 1)
+      $name = 'g' + $idx + '-' + $now + $ext
+      $filePath = Join-Path $dir $name
+      [IO.File]::WriteAllBytes($filePath, $photoPart.bytes)
+      $url = '/uploads/models/' + $slug + '/' + $name
+      $u.gallery = @($u.gallery) + @{ url = $url; addedAt = $now }
+      Save-Db $db
+      Send-Json $resp @{ ok = $true; gallery = @($u.gallery); user = (Public-User $u) }
+      return $true
+    }
+
+    'POST /api/model/gallery/remove' {
+      $u = Require-Model $req $resp $db
+      if (-not $u) { return $true }
+      $body = Read-JsonBody $req
+      $url = ("$($body.url)").Trim()
+      if (-not $url) {
+        Send-Json $resp @{ error = 'url is required.' } 400
+        return $true
+      }
+      $slug = Ensure-Slug $db $u
+      $expectedPrefix = '/uploads/models/' + $slug + '/'
+      if (-not $url.StartsWith($expectedPrefix)) {
+        Send-Json $resp @{ error = 'You can only remove your own photos.' } 403
+        return $true
+      }
+      if (-not $u.gallery) { $u.gallery = @() }
+      $kept = @()
+      $found = $false
+      foreach ($g in @($u.gallery)) {
+        if (([string]$g.url) -eq $url) { $found = $true; continue }
+        $kept += $g
+      }
+      if (-not $found) {
+        Send-Json $resp @{ error = 'Photo not found.' } 404
+        return $true
+      }
+      $u.gallery = $kept
+      # Also delete the on-disk file. Use Get-ModelUploadDir to be safe
+      # against path-traversal.
+      $rel = $url.Substring('/uploads/models/'.Length)  # 'slug/file.ext'
+      $filename = $rel.Split('/')[-1]
+      $dir = Get-ModelUploadDir $slug
+      $filePath = Join-Path $dir $filename
+      try { Remove-Item -Force $filePath -ErrorAction SilentlyContinue } catch {}
+      Save-Db $db
+      Send-Json $resp @{ ok = $true; gallery = @($u.gallery); user = (Public-User $u) }
+      return $true
+    }
   }
   return $false
 }
@@ -1418,6 +2114,12 @@ function Handle-Api($req, $resp, $path, $method) {
   if (Handle-Cam       $req $resp $db $path $method) { return }
   if (Handle-Tasks     $req $resp $db $path $method) { return }
   if (Handle-Community $req $resp $db $path $method) { return }
+  # Public model gallery + per-model detail (verification gated).
+  if (Handle-Models    $req $resp $db $path $method) { return }
+  # Email verification: start + confirm.
+  if (Handle-Verify    $req $resp $db $path $method) { return }
+  # Photo uploads: model main photo + gallery add/remove.
+  if (Handle-Uploads   $req $resp $db $path $method) { return }
   if (Handle-Model     $req $resp $db $path $method) { return }
   if (Handle-Admin     $req $resp $db $path $method) { return }
   Send-Json $resp @{ error = 'Not found.' } 404

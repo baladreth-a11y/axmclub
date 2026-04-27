@@ -15,19 +15,28 @@ function render(state) {
   const ageOk    = ageConfirmed();
 
   // Body classes:
-  //   is-gated     = signed out  (locks interaction)
-  //   is-age-gated = signed out AND age not confirmed (adds blur)
-  document.body.classList.toggle('is-gated',     !signedIn);
-  document.body.classList.toggle('is-age-gated', !signedIn && !ageOk);
+  //   is-age-gated = age not confirmed (full blur of every section)
+  //   is-gated     = age not confirmed (locks interaction until age is OK)
+  //   is-anon      = signed out (regardless of age) so signed-in-only
+  //                  widgets like the top-strip can hide themselves with
+  //                  a single CSS rule. The model gallery itself stays
+  //                  visible to anonymous visitors after age gate.
+  document.body.classList.toggle('is-age-gated', !ageOk);
+  document.body.classList.toggle('is-gated',     !ageOk);
+  document.body.classList.toggle('is-anon',      !signedIn);
 
   const gate = $('#gate');
-  gate.classList.toggle('hidden', signedIn);
-  if (signedIn) return;
+  if (!gate) return;
+  // After age confirmation, dismiss the gate entirely. Sign-in is
+  // surfaced via the navbar buttons and the verify-banner, not by a
+  // hard wall in front of the page.
+  gate.classList.toggle('hidden', ageOk);
+  if (ageOk) return;
 
   const ageStage  = gate.querySelector('[data-stage="age"]');
   const authStage = gate.querySelector('[data-stage="auth"]');
-  ageStage.classList.toggle('hidden',  ageOk);
-  authStage.classList.toggle('hidden', !ageOk);
+  if (ageStage)  ageStage.classList.remove('hidden');
+  if (authStage) authStage.classList.add('hidden');
 }
 
 function onAgeConfirm() {

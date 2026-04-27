@@ -23,7 +23,16 @@ param(
     [Parameter(Mandatory=$true)][string]$AdminKey,
     [string]$ServiceName = 'axmclub',
     # If not supplied, we auto-detect pwsh on PATH or in common install roots.
-    [string]$PwshPath    = ''
+    [string]$PwshPath    = '',
+    # Email verification + uploads. All optional; if SmtpHost is empty
+    # the server falls back to logging the verification link to stdout
+    # (good for staging / offline testing).
+    [string]$SmtpHost      = '',
+    [string]$SmtpPort      = '',
+    [string]$SmtpUser      = '',
+    [string]$SmtpPass      = '',
+    [string]$SmtpFrom      = '',
+    [string]$PublicBaseUrl = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -100,7 +109,18 @@ Write-Host "Installing service '$ServiceName'..." -ForegroundColor Cyan
 & $nssm set $ServiceName AppStderr             (Join-Path $logDir 'server.err.log')          | Out-Null
 & $nssm set $ServiceName AppRotateFiles        1                                             | Out-Null
 & $nssm set $ServiceName AppRotateBytes        10485760                                      | Out-Null
-& $nssm set $ServiceName AppEnvironmentExtra   "AURUM_ADMIN_KEY=$AdminKey"                   | Out-Null
+# AppEnvironmentExtra is a single multi-line string (one KEY=VALUE per
+# line). Empty values are dropped so the server falls back to its
+# defaults (e.g. SMTP-disabled = console-log mode for verify links).
+$envEntries = @( "AURUM_ADMIN_KEY=$AdminKey" )
+if ($SmtpHost)      { $envEntries += "AURUM_SMTP_HOST=$SmtpHost" }
+if ($SmtpPort)      { $envEntries += "AURUM_SMTP_PORT=$SmtpPort" }
+if ($SmtpUser)      { $envEntries += "AURUM_SMTP_USER=$SmtpUser" }
+if ($SmtpPass)      { $envEntries += "AURUM_SMTP_PASS=$SmtpPass" }
+if ($SmtpFrom)      { $envEntries += "AURUM_SMTP_FROM=$SmtpFrom" }
+if ($PublicBaseUrl) { $envEntries += "AURUM_BASE_URL=$PublicBaseUrl" }
+$envBlock = $envEntries -join "`r`n"
+& $nssm set $ServiceName AppEnvironmentExtra   $envBlock                                      | Out-Null
 & $nssm set $ServiceName Description 'AxMclub.com members site (PowerShell HttpListener)'    | Out-Null
 
 Write-Host "Starting service..." -ForegroundColor Cyan

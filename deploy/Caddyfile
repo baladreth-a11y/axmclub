@@ -60,7 +60,26 @@ example.com, www.example.com {
     #     match { path /api/* }
     # }
 
-    reverse_proxy 127.0.0.1:8080 {
+    # Allow up to 11 MB on the model upload endpoints (the backend caps the
+    # actual file at 10 MB; the extra headroom covers multipart overhead).
+    @upload {
+        path /api/model/photo /api/model/gallery/add
+    }
+    request_body @upload {
+        max_size 11MB
+    }
+
+    # Long-cache uploaded model photos. Files are content-addressed by
+    # gallery filename + main.<ext>; updates change the URL so cache TTL
+    # can be aggressive.
+    @uploadFiles {
+        path /uploads/*
+    }
+    header @uploadFiles {
+        Cache-Control "public, max-age=86400"
+    }
+
+    reverse_proxy *********:8080 {
         header_up X-Real-IP        {remote_host}
         header_up X-Forwarded-For  {remote_host}
         header_up X-Forwarded-Proto {scheme}

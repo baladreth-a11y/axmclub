@@ -20,6 +20,29 @@ async function request(path, { method = 'GET', body } = {}) {
   return data;
 }
 
+// Upload helper: POST a single file under field name `photo` as
+// multipart/form-data. Do NOT set Content-Type ourselves — the browser
+// fills in the boundary automatically when given a FormData body.
+async function uploadFile(path, file, fieldName = 'photo') {
+  const fd = new FormData();
+  fd.append(fieldName, file, file.name);
+  const res = await fetch(path, {
+    method: 'POST',
+    credentials: 'include',
+    body: fd
+  });
+
+  let data = {};
+  try { data = await res.json(); } catch { /* non-JSON response */ }
+
+  if (!res.ok) {
+    const err = new Error(data.error || `Upload failed (${res.status})`);
+    err.status = res.status;
+    err.data = data;
+    throw err;
+  }
+  return data;
+}
 export const api = {
   me:           () => request('/api/me'),
   stats:        () => request('/api/stats'),
@@ -41,6 +64,12 @@ export const api = {
 
   buyTokens:         amount => request('/api/tokens/buy', { method: 'POST', body: { amount } }),
   makeOffer:         body   => request('/api/offer',      { method: 'POST', body }),
+  // Public model gallery (no auth) + per-slug detail (verified-only).
+  models:       () => request('/api/models'),
+  modelBySlug:  slug => request('/api/models/' + encodeURIComponent(slug)),
+
+  // Email verification.
+  verifyStart: () => request('/api/verify/start', { method: 'POST' }),
 
   // Model dashboard. Each requires the caller to be signed in with
   // accountType == 'model' (server enforces with Require-Model).
@@ -51,5 +80,10 @@ export const api = {
   modelRevokePassword: code => request('/api/model/passwords/revoke', { method: 'POST', body: { code } }),
   modelOffers:         () => request('/api/model/offers'),
   modelRespondOffer:   body => request('/api/model/offers/respond', { method: 'POST', body }),
-  modelStats:          () => request('/api/model/stats')
+  modelStats:          () => request('/api/model/stats'),
+
+  // Photo + gallery uploads (multipart). Files arrive under field 'photo'.
+  uploadModelPhoto: file => uploadFile('/api/model/photo', file),
+  galleryAdd:       file => uploadFile('/api/model/gallery/add', file),
+  galleryRemove:    url  => request('/api/model/gallery/remove', { method: 'POST', body: { url } })
 };

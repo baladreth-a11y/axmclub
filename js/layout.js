@@ -25,6 +25,8 @@ import { initGate } from './gate.js';
 import { initHeader } from './header.js';
 import { initHeroStats } from './heroStats.js';
 import { initAuth } from './auth.js';
+import { initModels } from './models.js';
+import { initVerifyBanner } from './verify.js';
 
 // ---- Markup ---------------------------------------------------------
 // Navbar. The "Model dashboard" link is hidden by default and revealed
@@ -265,6 +267,10 @@ export function initSharedLayout({ activePage = null } = {}) {
   initHeader();
   if ($('#statMembers')) initHeroStats();
   initAuth();
+  initVerifyBanner();
+  // Pages that include a `#modelsGrid` placeholder get the dynamic
+  // gallery rendered into it. Otherwise this is a no-op.
+  initModels();
 
   // Toggle the "Model dashboard" nav link based on accountType.
   const modelLink = $('#navModelLink');

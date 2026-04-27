@@ -94,6 +94,25 @@ No other files need to change.
 - `GET  /api/stats`    — `{ members, spins }`
 - `POST /api/spin`     — `{ index, label, points, bonus, total, tier, user }`
 - `GET  /api/leaderboard` — `{ leaderboard: [{ name, points, tier }] }` (top 10)
+- `GET  /api/models`   — public list of model accounts (PII stripped). Backs the dynamic gallery on `/` and `/players.html`.
+- `GET  /api/models/{slug}` — per-model detail with `gallery`. Requires a signed-in user with `emailVerified == true`. Returns `401 { reason: 'sign-in' }` for anonymous, `403 { reason: 'verify-email' }` for unverified supporters.
+- `POST /api/verify/start` — emit a verification link to the signed-in user (uses SMTP if configured, otherwise prints `[verify-link] <url>` to stdout).
+- `GET  /api/verify/confirm?token=...` — flips `emailVerified=true` on success and returns a tiny HTML landing page.
+- `POST /api/admin/users/verify` — admin shortcut to flip `emailVerified` without an email round-trip.
+- `POST /api/model/photo` — multipart upload (field `photo`). Replaces the model's main photo. 10 MB cap; jpg/png/webp/gif only.
+- `POST /api/model/gallery/add` — multipart upload, adds to gallery (max 12 photos).
+- `POST /api/model/gallery/remove` — `{ url }` removes the entry and deletes the file. Path-prefix-guarded to the caller's slug.
+
+## Email + uploads
+Uploaded photos live under `<root>/uploads/models/<slug>/...` and are served by
+the same static-file path as the rest of the site. `uploads/` is in `.gitignore`
+so runtime files don't pollute commits.
+Verification email delivery uses `System.Net.Mail.SmtpClient`. Configure via env vars:
+- `AURUM_SMTP_HOST`  — SMTP relay hostname. **If unset, no real email is sent**: the link is logged to stdout with a `[verify-link]` prefix (this is what the e2e test relies on).
+- `AURUM_SMTP_PORT`  — default 587.
+- `AURUM_SMTP_USER`, `AURUM_SMTP_PASS` — optional credentials.
+- `AURUM_SMTP_FROM`  — sender address; defaults to `no-reply@axmclub.com`.
+- `AURUM_BASE_URL`   — the public URL used in the email link, e.g. `https://axmclub.com`. Defaults to `http://localhost:<Port>` for dev.
 
 ## Design system
 

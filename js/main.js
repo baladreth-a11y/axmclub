@@ -14,6 +14,8 @@ import { initTasks, refreshTasks } from './tasks.js';
 import { initCamroom } from './camroom.js';
 import { initGate } from './gate.js';
 import { initUserWidget } from './userWidget.js';
+import { initModels } from './models.js';
+import { initVerifyBanner } from './verify.js';
 
 // -------- Global error boundary ---------------------------------
 // Any uncaught JS error or unhandled promise rejection in the site
@@ -46,6 +48,8 @@ async function bootstrap() {
   initProfile();
   initAuth();
   initUserWidget();
+  initModels();
+  initVerifyBanner();
 
   // Initial data load. Don't block UI on failures.
   const [meRes, statsRes] = await Promise.allSettled([api.me(), api.stats()]);

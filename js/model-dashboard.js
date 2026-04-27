@@ -14,9 +14,13 @@ import { store } from './store.js';
 import { toast } from './ui.js';
 
 const SOCIAL_KEYS = ['telegram','snap','webcam','fansite'];
+const GENDER_VALUES = ['', 'female', 'male', 'crossdresser', 'transsexual'];
+const GALLERY_MAX = 12;
 
 let passwordsCache = [];
 let offersCache    = [];
+let galleryCache   = [];
+let currentUser    = null;
 
 function setText(sel, value) {
   const el = $(sel);
@@ -25,6 +29,7 @@ function setText(sel, value) {
 
 // ---- Profile editor -------------------------------------------------
 function fillProfileForm(user) {
+  currentUser = user;
   setText('#dashHello', `Welcome, ${user.name}.`);
   setText('#dashEmail', user.email);
   setText('#dashJoined', formatDate(user.joined));
@@ -33,11 +38,31 @@ function fillProfileForm(user) {
   f.elements['name'].value       = user.name || '';
   f.elements['bio'].value        = user.bio || '';
   f.elements['brandColor'].value = user.brandColor || '#7c6cff';
+  if (f.elements['gender']) {
+    const g = (user.gender || '').toLowerCase();
+    f.elements['gender'].value = GENDER_VALUES.includes(g) ? g : '';
+  }
   for (const k of SOCIAL_KEYS) {
     const input = f.elements[`social_${k}`];
     if (input) input.value = (user.socials && user.socials[k]) || '';
   }
   applyBrandPreview(user.brandColor);
+  renderMainPhoto(user.photoUrl);
+}
+
+function renderMainPhoto(url) {
+  const img = $('#mainPhotoPreview');
+  const fb  = $('#mainPhotoFallback');
+  if (!img || !fb) return;
+  if (url) {
+    img.src = url;
+    img.classList.remove('hidden');
+    fb.classList.add('hidden');
+  } else {
+    img.removeAttribute('src');
+    img.classList.add('hidden');
+    fb.classList.remove('hidden');
+  }
 }
 
 function applyBrandPreview(color) {
@@ -53,6 +78,7 @@ async function onProfileSubmit(e) {
     name:       (fd.get('name') || '').toString().trim(),
     bio:        (fd.get('bio')  || '').toString(),
     brandColor: (fd.get('brandColor') || '').toString().trim(),
+    gender:     (fd.get('gender') || '').toString().trim().toLowerCase(),
     socials: SOCIAL_KEYS.reduce((acc, k) => {
       acc[k] = (fd.get(`social_${k}`) || '').toString().trim();
       return acc;
@@ -63,6 +89,88 @@ async function onProfileSubmit(e) {
     store.set(s => ({ ...s, user: res.user }));
     fillProfileForm(res.user);
     toast('Profile saved.', 'success');
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+// ---- Photos: main upload + gallery add/remove ---------------------
+function renderGallery() {
+  const grid = $('#galleryGrid');
+  if (!grid) return;
+  setText('#galleryCountLabel', `(${galleryCache.length}/${GALLERY_MAX})`);
+  if (!galleryCache.length) {
+    grid.innerHTML = '<p class="dash-empty">No gallery photos yet.</p>';
+    return;
+  }
+  grid.innerHTML = galleryCache.map(g => `
+    <figure class="gallery-item">
+      <img src="${escapeHtml(g.url)}" alt="" loading="lazy" />
+      <button type="button" class="btn btn-outline gallery-remove" data-url="${escapeHtml(g.url)}">Remove</button>
+    </figure>`).join('');
+}
+
+async function onMainPhotoSubmit(e) {
+  e.preventDefault();
+  const input = $('#mainPhotoInput');
+  const file = input && input.files && input.files[0];
+  if (!file) {
+    toast('Pick an image first.', 'error');
+    return;
+  }
+  try {
+    const res = await api.uploadModelPhoto(file);
+    if (res.user) {
+      currentUser = res.user;
+      store.set(s => ({ ...s, user: res.user }));
+    }
+    renderMainPhoto(res.photoUrl);
+    e.target.reset();
+    toast('Main photo uploaded.', 'success');
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+async function onGalleryAddSubmit(e) {
+  e.preventDefault();
+  if (galleryCache.length >= GALLERY_MAX) {
+    toast(`Gallery full (max ${GALLERY_MAX}).`, 'error');
+    return;
+  }
+  const input = $('#galleryAddInput');
+  const file = input && input.files && input.files[0];
+  if (!file) {
+    toast('Pick an image first.', 'error');
+    return;
+  }
+  try {
+    const res = await api.galleryAdd(file);
+    if (res.user) {
+      currentUser = res.user;
+      store.set(s => ({ ...s, user: res.user }));
+    }
+    galleryCache = Array.isArray(res.gallery) ? res.gallery : galleryCache;
+    renderGallery();
+    e.target.reset();
+    toast('Photo added to gallery.', 'success');
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+async function onGalleryRemove(url) {
+  if (!url) return;
+  if (!confirm('Remove this photo from your gallery?')) return;
+  try {
+    const res = await api.galleryRemove(url);
+    if (res.user) {
+      currentUser = res.user;
+      store.set(s => ({ ...s, user: res.user }));
+    }
+    galleryCache = Array.isArray(res.gallery) ? res.gallery : galleryCache;
+    renderGallery();
+    toast('Photo removed.', 'success');
   } catch (err) {
     toast(err.message, 'error');
   }
@@ -213,12 +321,34 @@ export async function initModelDashboard(user) {
   // we were given, then refresh the cards in parallel.
   store.set({ user });
   fillProfileForm(user);
+  // Hydrate the gallery from the user payload (Public-User exposes
+  // galleryCount but not the URLs; we fetch the detail via slug).
+  if (user.slug) {
+    api.modelBySlug(user.slug)
+      .then(res => {
+        galleryCache = Array.isArray(res?.model?.gallery) ? res.model.gallery : [];
+        renderGallery();
+      })
+      .catch(() => {
+        galleryCache = [];
+        renderGallery();
+      });
+  } else {
+    renderGallery();
+  }
 
   $('#profileForm')?.addEventListener('submit', onProfileSubmit);
 
   // Live preview the brand color while the user types/picks.
   $('#profileForm')?.addEventListener('input', e => {
     if (e.target.name === 'brandColor') applyBrandPreview(e.target.value);
+  });
+
+  $('#mainPhotoForm')?.addEventListener('submit', onMainPhotoSubmit);
+  $('#galleryAddForm')?.addEventListener('submit', onGalleryAddSubmit);
+  $('#galleryGrid')?.addEventListener('click', e => {
+    const btn = e.target.closest('.gallery-remove');
+    if (btn && !btn.disabled) onGalleryRemove(btn.dataset.url);
   });
 
   $('#newPasswordForm')?.addEventListener('submit', onCreatePassword);

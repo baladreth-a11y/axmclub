@@ -51,6 +51,50 @@ function StatusCodeOf {
     catch { return 0 }
 }
 
+function Invoke-MultipartUpload {
+    param(
+        [string]$Uri,
+        [Microsoft.PowerShell.Commands.WebRequestSession]$Session,
+        [byte[]]$FileBytes,
+        [string]$FileName,
+        [string]$ContentType
+    )
+
+    Add-Type -AssemblyName System.Net.Http -ErrorAction SilentlyContinue
+    $sidCookie = $Session.Cookies.GetCookies($Uri) | Where-Object { $_.Name -eq 'sid' } | Select-Object -First 1
+    if (-not $sidCookie) { throw 'Session cookie sid is missing.' }
+
+    $client = $null
+    $multipart = $null
+    $fileContent = $null
+    try {
+        $client = [System.Net.Http.HttpClient]::new()
+        $client.DefaultRequestHeaders.Add('Cookie', 'sid=' + $sidCookie.Value)
+        $multipart = [System.Net.Http.MultipartFormDataContent]::new()
+        $fileContent = [System.Net.Http.ByteArrayContent]::new($FileBytes)
+        $fileContent.Headers.ContentType = [System.Net.Http.Headers.MediaTypeHeaderValue]::Parse($ContentType)
+        $multipart.Add($fileContent, 'photo', $FileName)
+
+        $resp = $client.PostAsync($Uri, $multipart).GetAwaiter().GetResult()
+        $text = $resp.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+        $json = $null
+        if ($text) {
+            try { $json = $text | ConvertFrom-Json } catch {}
+        }
+
+        return @{
+            statusCode = [int]$resp.StatusCode
+            body       = $text
+            json       = $json
+        }
+    }
+    finally {
+        if ($fileContent) { $fileContent.Dispose() }
+        if ($multipart)   { $multipart.Dispose() }
+        if ($client)      { $client.Dispose() }
+    }
+}
+
 Log ('AxMclub.com E2E — ' + (Get-Date -Format o)) 'Yellow'
 Log ('Test dir: ' + $TestDir)
 
@@ -265,12 +309,14 @@ try {
     Check 'GET / has Support & Rewards dropdown'  ($html.Content -match 'nav-dropdown-toggle')
     Check 'GET / has gate overlay element'        ($html.Content -match 'id="gate"')
     Check 'GET / has account-type segment'        ($html.Content -match 'class="acct-segment"')
-    Check 'GET / has Fansite link'                ($html.Content -match 'data-kind="fansite"')
-    # Three player cards (count of <article class="player-card">).
-    $playerCardCount = ([regex]::Matches($html.Content, 'class="player-card"')).Count
-    Check 'Players grid has exactly 6 cards' ($playerCardCount -eq 6) ('got ' + $playerCardCount)
-    $affiliateCount = ([regex]::Matches($html.Content, 'data-affiliate="crakrevenue"')).Count
-    Check 'Three affiliate performers each expose webcam + fansite (6 affiliate links)' ($affiliateCount -eq 6) ('got ' + $affiliateCount)
+    # Static cards have been replaced by the dynamic #modelsGrid; the
+    # gallery is populated client-side from GET /api/models. Regression
+    # guards: the placeholder is present and the legacy hard-coded
+    # `player-photo-N` classes are gone.
+    Check 'GET / has #modelsGrid placeholder'      ($html.Content -match 'id="modelsGrid"')
+    Check 'GET / no static player-photo-1 markup'  (-not ($html.Content -match 'player-photo-1'))
+    Check 'GET / no static player-card markup'     (-not ($html.Content -match 'class="player-card"'))
+    Check 'GET / no static affiliate links'        (-not ($html.Content -match 'data-affiliate="crakrevenue"'))
     Check 'GET / has #top-strip section'          ($html.Content -match 'id="top-strip"')
     Check 'GET / has stats widget'                ($html.Content -match 'class="stats-widget"')
     Check 'GET / has Rank stat'                   ($html.Content -match 'id="widgetRank"')
@@ -680,6 +726,168 @@ try {
     $spinResp = $spin
     Check 'Spin response includes streak field' ($null -ne $spinResp.streak -and $spinResp.streak -ge 1) ('got ' + $spinResp.streak)
     Check 'Spin response includes streakBonus field' ($null -ne $spinResp.streakBonus) ('got ' + $spinResp.streakBonus)
+
+    Section '21. Models gallery + verification + uploads'
+
+    # GET /api/models is fully public (no auth, no admin key).
+    $modelsList = Invoke-RestMethod -Uri ($Base + '/api/models')
+    Check '/api/models returns models array' ($null -ne $modelsList.models)
+    $novaCard = @($modelsList.models) | Where-Object { $_.slug -eq 'nova' } | Select-Object -First 1
+    Check 'Nova appears in /api/models'      ($null -ne $novaCard)
+    Check 'Public model card omits email'    ($null -eq $novaCard.email -or $novaCard.email -eq '')
+    Check 'Public model card omits points'   ($null -eq $novaCard.points)
+
+    # Profile update with gender + photoUrl (from the model session set up earlier).
+    $genUpd = Invoke-RestMethod -Uri ($Base + '/api/model/profile') -Method Post -ContentType 'application/json' -WebSession $modelSess `
+        -Body (JsonBody @{ gender='female' })
+    Check 'Gender persists on profile' ($genUpd.user.gender -eq 'female')
+
+    $badGender = 0
+    try {
+        $null = Invoke-RestMethod -Uri ($Base + '/api/model/profile') -Method Post -ContentType 'application/json' -WebSession $modelSess -Body (JsonBody @{ gender='unicorn' })
+    } catch { $badGender = StatusCodeOf $_ }
+    Check 'Bad gender returns 400' ($badGender -eq 400) ('got ' + $badGender)
+
+    # Anonymous /api/models/nova returns 401 with reason='sign-in'.
+    # PS7's Invoke-RestMethod surfaces the response body on $_.ErrorDetails.Message;
+    # PS5.1 falls back to the response stream on $_.Exception.Response.
+    function Read-ErrorJson($errRecord) {
+        if ($errRecord.ErrorDetails -and $errRecord.ErrorDetails.Message) {
+            try { return ($errRecord.ErrorDetails.Message | ConvertFrom-Json) } catch { return $null }
+        }
+        try {
+            $stream = $errRecord.Exception.Response.GetResponseStream()
+            if (-not $stream) { return $null }
+            $sr = New-Object IO.StreamReader($stream)
+            $body = $sr.ReadToEnd(); $sr.Close()
+            return ($body | ConvertFrom-Json)
+        } catch { return $null }
+    }
+
+    $anonProf = 0
+    $anonProfReason = ''
+    try {
+        $null = Invoke-RestMethod -Uri ($Base + '/api/models/nova')
+    } catch {
+        $anonProf = StatusCodeOf $_
+        $j = Read-ErrorJson $_
+        if ($j) { $anonProfReason = [string]$j.reason }
+    }
+    Check 'Anonymous /api/models/nova -> 401'           ($anonProf -eq 401)        ('got ' + $anonProf)
+    Check 'Anonymous /api/models/nova reason sign-in'   ($anonProfReason -eq 'sign-in') ('got ' + $anonProfReason)
+
+    # New unverified supporter -> 403 with reason='verify-email'.
+    $unvSess = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+    $null = Invoke-RestMethod -Uri ($Base + '/api/register') -Method Post -ContentType 'application/json' -WebSession $unvSess `
+        -Body (JsonBody @{ name='Una'; email='una@example.com'; password='abcd' })
+    $unvMe = Invoke-RestMethod -Uri ($Base + '/api/me') -WebSession $unvSess
+    Check 'New supporter is unverified by default' ($unvMe.user.emailVerified -eq $false)
+
+    $unvProf = 0; $unvReason = ''
+    try {
+        $null = Invoke-RestMethod -Uri ($Base + '/api/models/nova') -WebSession $unvSess
+    } catch {
+        $unvProf = StatusCodeOf $_
+        $j = Read-ErrorJson $_
+        if ($j) { $unvReason = [string]$j.reason }
+    }
+    Check 'Unverified user /api/models/nova -> 403'      ($unvProf -eq 403)            ('got ' + $unvProf)
+    Check 'Unverified user reason = verify-email'        ($unvReason -eq 'verify-email') ('got ' + $unvReason)
+
+    # Verification flow. POST /api/verify/start writes a [verify-link]
+    # entry to stdout (the harness redirects stdout to $outLog). We tail
+    # the file, extract the token, and confirm via GET.
+    $startRes = Invoke-RestMethod -Uri ($Base + '/api/verify/start') -Method Post -WebSession $unvSess
+    Check '/api/verify/start ok'  ($startRes.ok -eq $true)
+    Check '/api/verify/start sent' ($startRes.sent -eq $true)
+
+    Start-Sleep -Milliseconds 250
+    $logText = ''
+    if (Test-Path $outLog) { $logText = Get-Content $outLog -Raw -ErrorAction SilentlyContinue }
+    $tokenMatch = [regex]::Match($logText, '\[verify-link\][^?]*\?token=([A-Za-z0-9%]+)')
+    $token = ''
+    if ($tokenMatch.Success) { $token = [uri]::UnescapeDataString($tokenMatch.Groups[1].Value) }
+    Check 'Verify link captured from stdout' ($token -and $token.Length -gt 0) ('len=' + $token.Length)
+
+    if ($token) {
+        $confirmHtml = Invoke-WebRequest -Uri ($Base + '/api/verify/confirm?token=' + [uri]::EscapeDataString($token)) -UseBasicParsing -WebSession $unvSess
+        Check 'Confirm returns 200'           ($confirmHtml.StatusCode -eq 200)
+        Check 'Confirm body says Email verified' ($confirmHtml.Content -match 'Email verified')
+    }
+
+    $unvAfter = Invoke-RestMethod -Uri ($Base + '/api/me') -WebSession $unvSess
+    Check 'After confirm /api/me.user.emailVerified is true' ($unvAfter.user.emailVerified -eq $true)
+
+    $verifiedProf = Invoke-RestMethod -Uri ($Base + '/api/models/nova') -WebSession $unvSess
+    Check 'Verified user can read /api/models/nova'   ($verifiedProf.model.slug -eq 'nova')
+    Check 'Per-model detail includes gallery field'   ($null -ne $verifiedProf.model.gallery)
+
+
+    # 1x1 transparent PNG (67 bytes), base64-encoded.
+    $pngB64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNgYAAAAAMAASsJTYQAAAAASUVORK5CYII='
+    $pngBytes = [Convert]::FromBase64String($pngB64)
+
+    $upUrl = $Base + '/api/model/photo'
+    $upResult = Invoke-MultipartUpload -Uri $upUrl -Session $modelSess -FileBytes $pngBytes -FileName 'main.png' -ContentType 'image/png'
+    $upJson = $upResult.json
+    if ($upResult.statusCode -ne 200) {
+        $err = $upResult.body
+        if ($upJson -and $upJson.error) { $err = $upJson.error }
+        Check 'Main photo upload ok' $false ('http=' + $upResult.statusCode + ' err=' + $err)
+    }
+    if ($upResult.statusCode -eq 200 -and $upJson) {
+        Check 'Main photo upload ok'                 ($upJson.ok -eq $true)
+        Check 'Main photo URL under /uploads/'       ($upJson.photoUrl -match '^/uploads/models/nova/main\.png$') ('got ' + $upJson.photoUrl)
+        Check 'Public-User photoUrl reflects upload' ($upJson.user.photoUrl -eq $upJson.photoUrl)
+
+        $servePhoto = Invoke-WebRequest -Uri ($Base + $upJson.photoUrl) -UseBasicParsing
+        $serveCt = ((@($servePhoto.Headers['Content-Type'])) -join '')
+        Check 'Uploaded photo serves with image mime' ($serveCt -match 'image/png') ('got ' + $serveCt)
+        Check 'Uploaded photo bytes match upload size' ($servePhoto.RawContentLength -eq $pngBytes.Length) ('got ' + $servePhoto.RawContentLength)
+    }
+
+    # Bad mime gets rejected.
+    $badResult = Invoke-MultipartUpload -Uri $upUrl -Session $modelSess -FileBytes ([Text.Encoding]::ASCII.GetBytes('hello')) -FileName 'evil.txt' -ContentType 'text/plain'
+    Check 'Unsupported upload type returns 415' ($badResult.statusCode -eq 415) ('got ' + $badResult.statusCode)
+
+    # Gallery add then remove.
+    $galResult = Invoke-MultipartUpload -Uri ($Base + '/api/model/gallery/add') -Session $modelSess -FileBytes $pngBytes -FileName 'gal.png' -ContentType 'image/png'
+    $galJson = $galResult.json
+    Check 'Gallery add ok'                ($galResult.statusCode -eq 200 -and $galJson.ok -eq $true) ('got ' + $galResult.statusCode)
+    if ($galResult.statusCode -eq 200 -and $galJson) {
+        Check 'Gallery has at least one item' (@($galJson.gallery).Count -ge 1)
+
+        $galUrl = (@($galJson.gallery))[-1].url
+        $galServe = Invoke-WebRequest -Uri ($Base + $galUrl) -UseBasicParsing
+        Check 'Gallery photo serves 200' ($galServe.StatusCode -eq 200)
+
+        $galRm = Invoke-RestMethod -Uri ($Base + '/api/model/gallery/remove') -Method Post -ContentType 'application/json' -WebSession $modelSess -Body (JsonBody @{ url = $galUrl })
+        Check 'Gallery remove ok' ($galRm.ok -eq $true)
+        $galGone = 0
+        try {
+            $null = Invoke-WebRequest -Uri ($Base + $galUrl) -UseBasicParsing
+        } catch { $galGone = StatusCodeOf $_ }
+        Check 'Removed gallery photo returns 404' ($galGone -eq 404) ('got ' + $galGone)
+    }
+
+    # Removing someone else's URL is rejected.
+    $foreignRm = 0
+    try {
+        $null = Invoke-RestMethod -Uri ($Base + '/api/model/gallery/remove') -Method Post -ContentType 'application/json' -WebSession $modelSess -Body (JsonBody @{ url = '/uploads/models/someone/g1.png' })
+    } catch { $foreignRm = StatusCodeOf $_ }
+    Check 'Removing foreign gallery URL returns 403' ($foreignRm -eq 403) ('got ' + $foreignRm)
+
+    # Admin verify shortcut flips the flag without an email round-trip.
+    $adminVerify = Invoke-RestMethod -Uri ($Base + '/api/admin/users/verify') -Method Post -ContentType 'application/json' -Headers $adminHead -Body (JsonBody @{ email = 'alice@example.com' })
+    Check 'Admin verify endpoint flips flag' ($adminVerify.user.emailVerified -eq $true)
+
+    # Static page serving for m.html.
+    $mHtmlResp = Invoke-WebRequest -Uri ($Base + '/m.html') -UseBasicParsing
+    Check 'GET /m.html returns 200'              ($mHtmlResp.StatusCode -eq 200)
+    Check 'm.html has #mProfile placeholder'     ($mHtmlResp.Content -match 'id="mProfile"')
+    Check 'GET /js/models.js returns 200'        ((Invoke-WebRequest -Uri ($Base + '/js/models.js') -UseBasicParsing).StatusCode -eq 200)
+    Check 'GET /js/verify.js returns 200'        ((Invoke-WebRequest -Uri ($Base + '/js/verify.js') -UseBasicParsing).StatusCode -eq 200)
+    Check 'GET /js/model-profile.js returns 200' ((Invoke-WebRequest -Uri ($Base + '/js/model-profile.js') -UseBasicParsing).StatusCode -eq 200)
 
     Section 'Summary'
     Log ('  Passed: ' + $script:pass) 'Green'

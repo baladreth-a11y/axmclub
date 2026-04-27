@@ -34,6 +34,15 @@
             <label>Display name
               <input name="name" type="text" required minlength="1" maxlength="60" />
             </label>
+            <label>Gender
+              <select name="gender">
+                <option value="">— (none)</option>
+                <option value="female">Female</option>
+                <option value="male">Male</option>
+                <option value="crossdresser">Crossdresser</option>
+                <option value="transsexual">Transsexual</option>
+              </select>
+            </label>
             <label>Bio <small class="muted">(max 280 chars)</small>
               <textarea name="bio" rows="3" maxlength="280" placeholder="A short tagline. Vibe, hours, anything you want pinned."></textarea>
             </label>
@@ -52,6 +61,33 @@
             </fieldset>
             <button class="btn btn-primary" type="submit">Save profile</button>
           </form>
+        </section>
+
+        <!-- Photo + gallery -->
+        <section class="dash-card dash-card-wide" id="photoCard">
+          <h2>Photos</h2>
+          <p class="muted">Your main photo shows on the gallery card. Up to 12 gallery photos, 10 MB each (JPG, PNG, WebP, GIF).</p>
+          <div class="photo-main-row">
+            <div class="photo-main-preview">
+              <img id="mainPhotoPreview" alt="Main photo preview" />
+              <span id="mainPhotoFallback" class="photo-main-fallback">No photo yet</span>
+            </div>
+            <form id="mainPhotoForm" class="photo-main-form">
+              <label>Main photo
+                <input id="mainPhotoInput" name="photo" type="file" accept="image/jpeg,image/png,image/webp,image/gif" required />
+              </label>
+              <button class="btn btn-primary" type="submit">Upload main photo</button>
+            </form>
+          </div>
+          <hr class="dash-divider" />
+          <h3 class="photo-gallery-title">Gallery <small class="muted" id="galleryCountLabel">(0/12)</small></h3>
+          <form id="galleryAddForm" class="photo-gallery-form">
+            <input id="galleryAddInput" name="photo" type="file" accept="image/jpeg,image/png,image/webp,image/gif" required />
+            <button class="btn btn-primary" type="submit">Add to gallery</button>
+          </form>
+          <div id="galleryGrid" class="gallery-grid">
+            <p class="dash-empty">No gallery photos yet.</p>
+          </div>
         </section>
 
         <!-- Stats -->

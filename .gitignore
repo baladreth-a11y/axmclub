@@ -1,5 +1,6 @@
 # Runtime data (generated on first request)
 data/
+uploads/
 *.log
 *.log.*
 
