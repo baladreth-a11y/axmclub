@@ -27,6 +27,7 @@ import { initHeroStats } from './heroStats.js';
 import { initAuth } from './auth.js';
 import { initModels } from './models.js';
 import { initVerifyBanner } from './verify.js';
+import { initFeedback } from './feedback.js';
 
 // ---- Markup ---------------------------------------------------------
 // Navbar. The "Model dashboard" link is hidden by default and revealed
@@ -271,6 +272,9 @@ export function initSharedLayout({ activePage = null } = {}) {
   // Pages that include a `#modelsGrid` placeholder get the dynamic
   // gallery rendered into it. Otherwise this is a no-op.
   initModels();
+  // Always-on Feedback & Ideas FAB (bottom-right). Mounted on every
+  // page that uses initSharedLayout. Submissions land in db.feedback.
+  initFeedback();
 
   // Toggle the "Model dashboard" nav link based on accountType.
   const modelLink = $('#navModelLink');

@@ -63,6 +63,7 @@ function setUnlocked(on) {
   $('#usersSection').classList.toggle('hidden', !on);
   $('#passwordsSection').classList.toggle('hidden', !on);
   $('#offersSection').classList.toggle('hidden', !on);
+  const fb = $('#feedbackSection'); if (fb) fb.classList.toggle('hidden', !on);
   $('#authNotice').classList.toggle('hidden', on);
 }
 
@@ -220,7 +221,94 @@ async function setOfferStatus(userEmail, offerId, status) {
   }
 }
 
-/* ---------- Users ----------------------------------------------- */
+/* ---- Feedback inbox -------------------------------------------- */
+let feedbackCache = [];
+
+function feedbackRow(f) {
+  const type = (f.type || 'other').toLowerCase();
+  const status = (f.status || 'open').toLowerCase();
+  const cls = status === 'resolved' ? ' is-resolved' : (status === 'archived' ? ' is-archived' : '');
+  const meta = [
+    f.page ? ('on ' + f.page) : '',
+    f.userEmail ? ('by ' + f.userEmail) : 'anonymous',
+    f.contact ? ('reply: ' + f.contact) : '',
+    formatDate(f.at)
+  ].filter(Boolean).join(' · ');
+  const actions = status === 'open'
+    ? `<div class="admin-row-actions">
+         <button class="btn btn-outline fb-resolve-btn" data-id="${escapeHtml(f.id)}" data-status="resolved">Resolve</button>
+         <button class="btn btn-ghost fb-resolve-btn" data-id="${escapeHtml(f.id)}" data-status="archived">Archive</button>
+       </div>`
+    : `<div class="admin-row-actions">
+         <button class="btn btn-ghost fb-resolve-btn" data-id="${escapeHtml(f.id)}" data-status="open">Reopen</button>
+       </div>`;
+  return `
+    <div class="feedback-row${cls}">
+      <div>
+        <span class="feedback-pill ${escapeHtml(type)}">${escapeHtml(type)}</span>
+        <div class="fb-meta" style="margin-top:6px">${escapeHtml(status)}</div>
+      </div>
+      <div>
+        <div class="fb-msg">${escapeHtml(f.message)}</div>
+        <div class="fb-meta">${escapeHtml(meta)}</div>
+      </div>
+      ${actions}
+    </div>`;
+}
+
+function renderFeedback() {
+  const body = $('#feedbackBody');
+  if (!body) return;
+  const typeF = ($('#feedbackTypeFilter')?.value || '').toLowerCase();
+  const statusF = ($('#feedbackStatusFilter')?.value || '').toLowerCase();
+  const filtered = feedbackCache.filter(f => {
+    if (typeF && (f.type || '').toLowerCase() !== typeF) return false;
+    if (statusF && (f.status || 'open').toLowerCase() !== statusF) return false;
+    return true;
+  });
+  if (!feedbackCache.length) {
+    body.innerHTML = '<div class="admin-empty">No feedback yet.</div>';
+  } else if (!filtered.length) {
+    body.innerHTML = '<div class="admin-empty">No feedback matches the current filter.</div>';
+  } else {
+    body.innerHTML = filtered.map(feedbackRow).join('');
+  }
+  const el = $('#feedbackCount');
+  if (el) {
+    if (!feedbackCache.length) { el.textContent = '—'; }
+    else if (filtered.length === feedbackCache.length) { el.textContent = `${feedbackCache.length} item${feedbackCache.length === 1 ? '' : 's'}`; }
+    else { el.textContent = `${filtered.length} / ${feedbackCache.length}`; }
+  }
+}
+
+async function loadFeedback() {
+  const body = $('#feedbackBody');
+  if (!body) return;
+  body.innerHTML = '<div class="admin-empty">Loading…</div>';
+  try {
+    const { feedback } = await adminFetch('/api/admin/feedback');
+    feedbackCache = Array.isArray(feedback) ? feedback : [];
+    renderFeedback();
+  } catch (err) {
+    feedbackCache = [];
+    body.innerHTML = `<div class="admin-empty">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+async function setFeedbackStatus(id, status) {
+  try {
+    await adminFetch('/api/admin/feedback/resolve', {
+      method: 'POST',
+      body: JSON.stringify({ id, status })
+    });
+    toast(`Feedback ${status}.`, 'success');
+    loadFeedback();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+/* ---- Users ----------------------------------------------------- */
 // Local cache + edit-modal state. The list endpoint returns a snapshot;
 // every adjust/delete just re-fetches.
 let usersCache = [];
@@ -377,6 +465,7 @@ function applyKey(next) {
     loadUsers();
     loadPasswords();
     loadOffers();
+    loadFeedback();
   }
 }
 
@@ -387,6 +476,7 @@ if (adminKey) {
   loadUsers();
   loadPasswords();
   loadOffers();
+  loadFeedback();
 }
 
 $('#saveKeyBtn').addEventListener('click', () => applyKey($('#adminKeyInput').value));
@@ -422,6 +512,15 @@ $('#offersBody').addEventListener('click', e => {
 // typing feels instant and doesn't hammer the API.
 $('#offersStatusFilter')?.addEventListener('change', renderOffers);
 $('#offersSearch')?.addEventListener('input', renderOffers);
+
+// Feedback inbox: filter + resolve/reopen buttons.
+$('#feedbackTypeFilter')?.addEventListener('change', renderFeedback);
+$('#feedbackStatusFilter')?.addEventListener('change', renderFeedback);
+$('#feedbackBody')?.addEventListener('click', e => {
+  const btn = e.target.closest('.fb-resolve-btn');
+  if (!btn) return;
+  setFeedbackStatus(btn.dataset.id, btn.dataset.status || 'resolved');
+});
 
 // Users tab: filter, edit, delete.
 $('#usersTypeFilter')?.addEventListener('change', renderUsers);

@@ -889,6 +889,74 @@ try {
     Check 'GET /js/verify.js returns 200'        ((Invoke-WebRequest -Uri ($Base + '/js/verify.js') -UseBasicParsing).StatusCode -eq 200)
     Check 'GET /js/model-profile.js returns 200' ((Invoke-WebRequest -Uri ($Base + '/js/model-profile.js') -UseBasicParsing).StatusCode -eq 200)
 
+    Section '22. Feedback widget'
+
+    # Anonymous POST works (no auth required).
+    $fbAnon = Invoke-RestMethod -Uri ($Base + '/api/feedback') -Method Post -ContentType 'application/json' `
+        -Body (JsonBody @{ type='idea'; message='Wheel is gorgeous'; page='/'; contact='' })
+    Check 'Anonymous feedback POST returns ok' ($fbAnon.ok -eq $true)
+    Check 'Anonymous feedback returns id'      ([bool]$fbAnon.id)
+
+    # Empty message rejected.
+    $emptyFb = 0
+    try {
+        $null = Invoke-RestMethod -Uri ($Base + '/api/feedback') -Method Post -ContentType 'application/json' -Body (JsonBody @{ type='bug'; message='   ' })
+    } catch { $emptyFb = StatusCodeOf $_ }
+    Check 'Empty feedback message returns 400' ($emptyFb -eq 400) ('got ' + $emptyFb)
+
+    # Over-long message rejected.
+    $bigMsg = ('x' * 2100)
+    $bigFb = 0
+    try {
+        $null = Invoke-RestMethod -Uri ($Base + '/api/feedback') -Method Post -ContentType 'application/json' -Body (JsonBody @{ type='bug'; message=$bigMsg })
+    } catch { $bigFb = StatusCodeOf $_ }
+    Check 'Oversized feedback message returns 400' ($bigFb -eq 400) ('got ' + $bigFb)
+
+    # Signed-in submission carries userEmail through.
+    $fbSigned = Invoke-RestMethod -Uri ($Base + '/api/feedback') -Method Post -ContentType 'application/json' -WebSession $aliceSession `
+        -Body (JsonBody @{ type='bug'; message='Spin button froze on me'; page='/play.html'; contact='alice@example.com' })
+    Check 'Signed-in feedback POST returns ok' ($fbSigned.ok -eq $true)
+
+    # Admin GET shows entries.
+    $fbAdmin = Invoke-RestMethod -Uri ($Base + '/api/admin/feedback') -Headers $adminHead
+    Check 'Admin feedback GET returns array' ($null -ne $fbAdmin.feedback)
+    Check 'Admin feedback GET count >= 2'    ($fbAdmin.count -ge 2) ('got ' + $fbAdmin.count)
+    $bugEntry = @($fbAdmin.feedback) | Where-Object { $_.type -eq 'bug' -and $_.message -match 'Spin button' } | Select-Object -First 1
+    Check 'Bug entry recorded with userEmail'  ($bugEntry -and $bugEntry.userEmail -eq 'alice@example.com')
+    Check 'Bug entry default status open'      ($bugEntry -and $bugEntry.status -eq 'open')
+
+    # Admin resolve flips the status.
+    $fbResolve = Invoke-RestMethod -Uri ($Base + '/api/admin/feedback/resolve') -Method Post -ContentType 'application/json' -Headers $adminHead `
+        -Body (JsonBody @{ id=$bugEntry.id; status='resolved' })
+    Check 'Admin resolve returns ok'        ($fbResolve.ok -eq $true)
+    Check 'Admin resolve returns status'    ($fbResolve.status -eq 'resolved')
+    $fbAdmin2 = Invoke-RestMethod -Uri ($Base + '/api/admin/feedback') -Headers $adminHead
+    $resolved = @($fbAdmin2.feedback) | Where-Object { $_.id -eq $bugEntry.id } | Select-Object -First 1
+    Check 'Resolved entry persists status'  ($resolved -and $resolved.status -eq 'resolved')
+
+    # Unknown id -> 404.
+    $fbBad = 0
+    try {
+        $null = Invoke-RestMethod -Uri ($Base + '/api/admin/feedback/resolve') -Method Post -ContentType 'application/json' -Headers $adminHead -Body (JsonBody @{ id='nope-not-real'; status='resolved' })
+    } catch { $fbBad = StatusCodeOf $_ }
+    Check 'Resolve unknown id returns 404' ($fbBad -eq 404) ('got ' + $fbBad)
+
+    # Admin endpoints require the admin key.
+    $fbAuth = 0
+    try {
+        $null = Invoke-RestMethod -Uri ($Base + '/api/admin/feedback')
+    } catch { $fbAuth = StatusCodeOf $_ }
+    Check 'Anonymous /api/admin/feedback returns 403' ($fbAuth -eq 403) ('got ' + $fbAuth)
+
+    # Frontend artifact + page mounts. The FAB is injected at runtime
+    # by initFeedback() (called from layout.js), so it isn't in static
+    # HTML; verify the module is reachable and that layout.js wires it.
+    Check 'GET /js/feedback.js returns 200' ((Invoke-WebRequest -Uri ($Base + '/js/feedback.js') -UseBasicParsing).StatusCode -eq 200)
+    $layoutSrc = (Invoke-WebRequest -Uri ($Base + '/js/layout.js') -UseBasicParsing).Content
+    Check 'layout.js wires initFeedback()' ($layoutSrc -match 'initFeedback\(\)')
+    $cssSrc = (Invoke-WebRequest -Uri ($Base + '/styles.css') -UseBasicParsing).Content
+    Check 'styles.css ships .feedback-fab'  ($cssSrc -match '\.feedback-fab')
+
     Section 'Summary'
     Log ('  Passed: ' + $script:pass) 'Green'
     $failColor = 'Green'

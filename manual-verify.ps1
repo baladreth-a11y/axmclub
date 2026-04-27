@@ -125,6 +125,23 @@ try {
   Ok 'Public-User exposes slug field'           ($null -ne $samMe.user.slug)
 
   Write-Host ""
+  Write-Host "== 11. Feedback widget always-on ==" -ForegroundColor Cyan
+  $feedbackJs = Invoke-WebRequest -Uri ($Base + '/js/feedback.js') -UseBasicParsing
+  Ok 'GET /js/feedback.js returns 200'           ($feedbackJs.StatusCode -eq 200)
+  Ok 'feedback.js exports initFeedback'          ($feedbackJs.Content -match 'export function initFeedback')
+
+  $layoutJs = Invoke-WebRequest -Uri ($Base + '/js/layout.js') -UseBasicParsing
+  Ok 'layout.js wires initFeedback()'            ($layoutJs.Content -match 'initFeedback\(\)')
+
+  $fbBody = @{ type='idea'; message='manual-verify ping'; page='/' } | ConvertTo-Json
+  $fbAnon = Invoke-RestMethod -Uri ($Base + '/api/feedback') -Method Post -ContentType 'application/json' -Body $fbBody
+  Ok 'Anonymous feedback POST returns ok'        ($fbAnon.ok -eq $true)
+
+  $fbAdmin403 = 0
+  try { $null = Invoke-RestMethod -Uri ($Base + '/api/admin/feedback') } catch { $fbAdmin403 = Code $_ }
+  Ok 'Anonymous /api/admin/feedback -> 403'      ($fbAdmin403 -eq 403) ('got ' + $fbAdmin403)
+
+  Write-Host ""
   Write-Host ("== Manual verify summary: " + $pass + ' passed, ' + $fail + ' failed ==') -ForegroundColor $(if ($fail) { 'Red' } else { 'Green' })
 }
 finally {

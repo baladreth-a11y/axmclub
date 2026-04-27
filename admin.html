@@ -258,6 +258,29 @@
       </table>
     </section>
 
+    <!-- Feedback inbox -->
+    <section id="feedbackSection" class="admin-card hidden">
+      <h2>Feedback inbox</h2>
+      <div class="admin-toolbar">
+        <select id="feedbackTypeFilter" aria-label="Filter by type">
+          <option value="">All types</option>
+          <option value="bug">Bugs</option>
+          <option value="idea">Ideas</option>
+          <option value="other">Other</option>
+        </select>
+        <select id="feedbackStatusFilter" aria-label="Filter by status">
+          <option value="">All statuses</option>
+          <option value="open" selected>Open</option>
+          <option value="resolved">Resolved</option>
+          <option value="archived">Archived</option>
+        </select>
+        <span id="feedbackCount" class="admin-toolbar-count">—</span>
+      </div>
+      <div id="feedbackBody">
+        <div class="admin-empty">Enter admin key to load.</div>
+      </div>
+    </section>
+
     <!-- Offers -->
     <section id="offersSection" class="admin-card hidden">
       <h2>Member offers</h2>

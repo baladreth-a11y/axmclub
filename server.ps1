@@ -174,6 +174,14 @@ $Script:UploadMimeTypes = @{
 $Script:GenderValues = @('male','female','crossdresser','transsexual')
 $Script:GalleryMax   = 12
 $Script:VerifyTtlMs  = 24 * 60 * 60 * 1000  # 24h
+# Feedback widget rate limit + caps. Per-IP submission window in memory:
+# { ip = @( unixMs, unixMs, ... ) }. Pruned on each submit.
+$Script:FeedbackRate          = @{}
+$Script:FeedbackWindowMs      = 60 * 60 * 1000   # 1 hour rolling window
+$Script:FeedbackMaxPerWindow  = 10
+$Script:FeedbackMaxLength     = 2000
+$Script:FeedbackMaxStored     = 1000
+$Script:FeedbackTypes         = @('bug','idea','other')
 
 # ---------- Helpers ----------
 function ConvertTo-Hashtable {
@@ -203,6 +211,7 @@ function Load-Db {
       sessions = @{}
       stats    = @{ members = 0; spins = 0 }
       results  = @()
+      feedback = @()
     }
   }
   try {
@@ -214,10 +223,11 @@ function Load-Db {
     if (-not $h.sessions) { $h.sessions = @{} }
     if (-not $h.stats)    { $h.stats    = @{ members = 0; spins = 0 } }
     if (-not $h.results)  { $h.results  = @() }
+    if (-not $h.feedback) { $h.feedback = @() }
     return $h
   } catch {
     Write-Host "WARN: Could not read db.json, starting fresh. ($_)" -ForegroundColor Yellow
-    return @{ users=@{}; sessions=@{}; stats=@{members=0;spins=0}; results=@() }
+    return @{ users=@{}; sessions=@{}; stats=@{members=0;spins=0}; results=@(); feedback=@() }
   }
 }
 
@@ -2085,6 +2095,126 @@ function Handle-Tasks($req, $resp, $db, $path, $method) {
   return $false
 }
 
+# ---- Feedback & ideas widget -------------------------------------------
+# Anonymous-friendly POST endpoint backing the always-on Feedback FAB plus
+# admin-only listing/resolution endpoints. Persists to db.feedback (capped
+# at $Script:FeedbackMaxStored entries; oldest dropped when full).
+function Get-ClientIp($req) {
+  try {
+    if ($req.RemoteEndPoint -and $req.RemoteEndPoint.Address) {
+      return [string]$req.RemoteEndPoint.Address
+    }
+  } catch {}
+  return 'unknown'
+}
+
+function Test-FeedbackRate([string]$ip) {
+  $now = NowMs
+  $cutoff = $now - [long]$Script:FeedbackWindowMs
+  $existing = @()
+  if ($Script:FeedbackRate.ContainsKey($ip)) {
+    foreach ($t in @($Script:FeedbackRate[$ip])) {
+      if ([long]$t -ge $cutoff) { $existing += [long]$t }
+    }
+  }
+  if ($existing.Count -ge [int]$Script:FeedbackMaxPerWindow) { return $false }
+  $existing += $now
+  $Script:FeedbackRate[$ip] = $existing
+  return $true
+}
+
+function Handle-Feedback($req, $resp, $db, $path, $method) {
+  $key = "$method $path"
+  switch ($key) {
+
+    'POST /api/feedback' {
+      $body = Read-JsonBody $req
+      $type = ("$($body.type)").Trim().ToLowerInvariant()
+      if (-not $type -or ($Script:FeedbackTypes -notcontains $type)) { $type = 'other' }
+      $message = ("$($body.message)").Trim()
+      if (-not $message) {
+        Send-Json $resp @{ error = 'Message is required.' } 400
+        return $true
+      }
+      if ($message.Length -gt [int]$Script:FeedbackMaxLength) {
+        Send-Json $resp @{ error = ("Message must be at most " + $Script:FeedbackMaxLength + " characters.") } 400
+        return $true
+      }
+      $page = ("$($body.page)").Trim()
+      if ($page.Length -gt 256) { $page = $page.Substring(0, 256) }
+      $contact = ("$($body.contact)").Trim()
+      if ($contact.Length -gt 200) { $contact = $contact.Substring(0, 200) }
+      $ip = Get-ClientIp $req
+      if (-not (Test-FeedbackRate $ip)) {
+        Send-Json $resp @{ error = 'Too many submissions — try again later.' } 429
+        return $true
+      }
+      $ua = ''
+      if ($req.Headers['User-Agent']) { $ua = [string]$req.Headers['User-Agent'] }
+      if ($ua.Length -gt 256) { $ua = $ua.Substring(0, 256) }
+      $userEmail = ''
+      $s = Get-SessionUser $req $db
+      if ($s) { $userEmail = [string]$s.user.email }
+      $entry = @{
+        id        = (New-Token)
+        type      = $type
+        message   = $message
+        page      = $page
+        contact   = $contact
+        userEmail = $userEmail
+        ip        = $ip
+        userAgent = $ua
+        at        = (NowMs)
+        status    = 'open'
+      }
+      if (-not $db.feedback) { $db.feedback = @() }
+      $list = @($db.feedback) + $entry
+      if ($list.Count -gt [int]$Script:FeedbackMaxStored) {
+        $list = @($list[($list.Count - [int]$Script:FeedbackMaxStored)..($list.Count - 1)])
+      }
+      $db.feedback = $list
+      Save-Db $db
+      Send-Json $resp @{ ok = $true; id = $entry.id }
+      return $true
+    }
+
+    'GET /api/admin/feedback' {
+      if (-not (Require-Admin $req $resp)) { return $true }
+      $list = @()
+      if ($db.feedback) { $list = @($db.feedback) }
+      $list = @($list | Sort-Object -Property { [long]$_.at } -Descending)
+      Send-Json $resp @{ feedback = $list; count = @($list).Count }
+      return $true
+    }
+
+    'POST /api/admin/feedback/resolve' {
+      if (-not (Require-Admin $req $resp)) { return $true }
+      $body = Read-JsonBody $req
+      $id = ("$($body.id)").Trim()
+      $status = ("$($body.status)").Trim().ToLowerInvariant()
+      $valid = @('open','resolved','archived')
+      if ($valid -notcontains $status) { $status = 'resolved' }
+      if (-not $id) {
+        Send-Json $resp @{ error = 'id is required.' } 400
+        return $true
+      }
+      if (-not $db.feedback) { $db.feedback = @() }
+      $found = $false
+      foreach ($f in @($db.feedback)) {
+        if ($f.id -eq $id) { $f.status = $status; $found = $true; break }
+      }
+      if (-not $found) {
+        Send-Json $resp @{ error = 'Feedback not found.' } 404
+        return $true
+      }
+      Save-Db $db
+      Send-Json $resp @{ ok = $true; id = $id; status = $status }
+      return $true
+    }
+  }
+  return $false
+}
+
 # ---- Community: leaderboard --------------------------------------------
 function Handle-Community($req, $resp, $db, $path, $method) {
   if ("$method $path" -eq 'GET /api/leaderboard') {
@@ -2114,6 +2244,8 @@ function Handle-Api($req, $resp, $path, $method) {
   if (Handle-Cam       $req $resp $db $path $method) { return }
   if (Handle-Tasks     $req $resp $db $path $method) { return }
   if (Handle-Community $req $resp $db $path $method) { return }
+  # Always-on Feedback widget (POST is anonymous; admin GET/resolve gated).
+  if (Handle-Feedback  $req $resp $db $path $method) { return }
   # Public model gallery + per-model detail (verification gated).
   if (Handle-Models    $req $resp $db $path $method) { return }
   # Email verification: start + confirm.

@@ -85,5 +85,8 @@ export const api = {
   // Photo + gallery uploads (multipart). Files arrive under field 'photo'.
   uploadModelPhoto: file => uploadFile('/api/model/photo', file),
   galleryAdd:       file => uploadFile('/api/model/gallery/add', file),
-  galleryRemove:    url  => request('/api/model/gallery/remove', { method: 'POST', body: { url } })
+  galleryRemove:    url  => request('/api/model/gallery/remove', { method: 'POST', body: { url } }),
+
+  // Feedback widget. POST is anonymous-friendly.
+  submitFeedback:        body => request('/api/feedback', { method: 'POST', body })
 };
