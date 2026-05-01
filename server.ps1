@@ -193,6 +193,20 @@ $Script:ChatRateWindowMs      = 60 * 1000        # 1 minute rolling window
 $Script:ChatRateMaxPerWindow  = 30
 $Script:DmPolicies            = @('open','mutual','closed')
 
+# Cam2cam ephemeral signalling state (in-memory, never persisted).
+# $Script:Calls         : id -> @{ id; from; fromName; to; toName; status;
+#                                 createdAt; touchedAt }. status is one of
+#                         'pending' | 'accepted' | 'declined' | 'ended'.
+# $Script:CallSignals   : id -> @( @{ seq; at; from; kind; payload } ... ).
+# Prune-Calls drops anything older than $Script:CallTtlMs touched-at and
+# anything still 'pending' past $Script:CallRequestTtlMs.
+$Script:Calls                 = @{}
+$Script:CallSignals           = @{}
+$Script:CallTtlMs             = 5 * 60 * 1000     # 5 min absolute lifetime
+$Script:CallRequestTtlMs      = 30 * 1000         # 30s pending invite TTL
+$Script:CallSignalsPerCall    = 200
+$Script:CallSignalKinds       = @('offer','answer','ice','bye')
+
 # ---------- Helpers ----------
 function ConvertTo-Hashtable {
   param($obj)
@@ -1222,7 +1236,52 @@ function Handle-Economy($req, $resp, $db, $path, $method) {
   return $false
 }
 
-# ---- Cam room: status / redeem-password / create-password --------------
+# ---- Cam2cam ephemeral signalling helpers ------------------------------
+# Calls and CallSignals are kept entirely in memory. Prune-Calls walks
+# both maps and drops any call whose touchedAt is older than the absolute
+# TTL or whose pending invite has aged past the request TTL. Called from
+# the top of every cam call endpoint so callers always see fresh state.
+function Prune-Calls {
+  if (-not $Script:Calls) { $Script:Calls = @{} }
+  if (-not $Script:CallSignals) { $Script:CallSignals = @{} }
+  $now = NowMs
+  $dead = @()
+  foreach ($id in @($Script:Calls.Keys)) {
+    $c = $Script:Calls[$id]
+    $age = $now - [long]$c.touchedAt
+    if (([string]$c.status) -eq 'pending' -and $age -gt [long]$Script:CallRequestTtlMs) { $dead += $id; continue }
+    if ($age -gt [long]$Script:CallTtlMs) { $dead += $id; continue }
+  }
+  foreach ($id in $dead) {
+    $Script:Calls.Remove($id) | Out-Null
+    if ($Script:CallSignals.ContainsKey($id)) { $Script:CallSignals.Remove($id) | Out-Null }
+  }
+}
+
+function Get-CallById([string]$id) {
+  if (-not $id) { return $null }
+  if (-not $Script:Calls.ContainsKey($id)) { return $null }
+  return $Script:Calls[$id]
+}
+
+function Public-Call($c, [string]$myEmail) {
+  if (-not $c) { return $null }
+  $from = ([string]$c.from).ToLowerInvariant()
+  $role = if ($from -eq $myEmail) { 'caller' } else { 'callee' }
+  return @{
+    id        = [string]$c.id
+    from      = [string]$c.from
+    fromName  = [string]$c.fromName
+    to        = [string]$c.to
+    toName    = [string]$c.toName
+    status    = [string]$c.status
+    createdAt = [long]$c.createdAt
+    touchedAt = [long]$c.touchedAt
+    role      = $role
+  }
+}
+
+# ---- Cam room: status / redeem-password / create-password / cam2cam ----
 function Handle-Cam($req, $resp, $db, $path, $method) {
   $key = "$method $path"
   switch ($key) {
@@ -1294,6 +1353,252 @@ function Handle-Cam($req, $resp, $db, $path, $method) {
       }
       $Script:CamPasswords[$pw] = @{ uses = $uses; note = $note; usesByUser = @{}; createdBy = 'admin' }
       Send-Json $resp @{ ok = $true; password = $pw; uses = $uses; note = $note; createdBy = 'admin' }
+      return $true
+    }
+
+    # Toggle the caller's own cam2cam opt-in. Persisted on the user record
+    # so it survives restarts and is reflected in /api/me + /api/online.
+    'POST /api/cam2cam' {
+      $u = Require-Auth $req $resp $db
+      if (-not $u) { return $true }
+      $body = Read-JsonBody $req
+      $enabled = $false
+      if ($body.PSObject.Properties['enabled'] -or ($body -is [hashtable] -and $body.ContainsKey('enabled'))) {
+        $enabled = [bool]$body.enabled
+      }
+      $u.cam2cam = $enabled
+      Save-Db $db
+      Send-Json $resp @{ ok = $true; cam2cam = $enabled; user = (Public-User $u) }
+      return $true
+    }
+
+    # Initiate a cam2cam call. Both sides must have cam2cam = true.
+    # Generates an ephemeral call id; the callee will see it on the next
+    # /api/cam/inbox poll.
+    'POST /api/cam/request' {
+      $u = Require-Auth $req $resp $db
+      if (-not $u) { return $true }
+      Prune-Calls
+      $body = Read-JsonBody $req
+      $to = ("$($body.to)").Trim().ToLowerInvariant()
+      if (-not $to) { Send-Json $resp @{ error = 'to is required.' } 400; return $true }
+      $myEmailLc = ([string]$u.email).ToLowerInvariant()
+      if ($to -eq $myEmailLc) { Send-Json $resp @{ error = 'Cannot call yourself.' } 400; return $true }
+      if (-not $db.users.ContainsKey($to)) { Send-Json $resp @{ error = 'Peer not found.' } 404; return $true }
+      $peer = $db.users[$to]
+      $myCam = (Public-Online $u).cam2cam
+      $peerCam = (Public-Online $peer).cam2cam
+      if (-not ($myCam -and $peerCam)) {
+        Send-Json $resp @{ error = 'Both users must enable cam2cam.'; reason = 'cam2cam-off' } 403
+        return $true
+      }
+      # Drop any prior live call between the same two parties so each
+      # request gets a fresh signalling channel.
+      foreach ($cid in @($Script:Calls.Keys)) {
+        $c = $Script:Calls[$cid]
+        if (([string]$c.status) -eq 'ended') { continue }
+        $pa = ([string]$c.from).ToLowerInvariant()
+        $pb = ([string]$c.to).ToLowerInvariant()
+        if (($pa -eq $myEmailLc -and $pb -eq $to) -or ($pb -eq $myEmailLc -and $pa -eq $to)) {
+          $Script:Calls.Remove($cid) | Out-Null
+          if ($Script:CallSignals.ContainsKey($cid)) { $Script:CallSignals.Remove($cid) | Out-Null }
+        }
+      }
+      $now = NowMs
+      $id = New-Token
+      $Script:Calls[$id] = @{
+        id        = $id
+        from      = $myEmailLc
+        fromName  = [string]$u.name
+        to        = $to
+        toName    = [string]$peer.name
+        status    = 'pending'
+        createdAt = $now
+        touchedAt = $now
+      }
+      $Script:CallSignals[$id] = @()
+      Send-Json $resp @{
+        ok        = $true
+        id        = $id
+        status    = 'pending'
+        expiresAt = $now + [long]$Script:CallRequestTtlMs
+        peerName  = [string]$peer.name
+      }
+      return $true
+    }
+
+    # Pull pending requests + recent updates targeted at the caller. The
+    # `since` cursor is a touchedAt timestamp; the client tracks the
+    # newest one it has seen and re-polls every 2s.
+    'GET /api/cam/inbox' {
+      $u = Require-Auth $req $resp $db
+      if (-not $u) { return $true }
+      Prune-Calls
+      $since = 0
+      if ($req.Url.Query) {
+        $q = [System.Web.HttpUtility]::ParseQueryString($req.Url.Query)
+        if ($q['since']) { $since = [long]$q['since'] }
+      }
+      $myEmail = ([string]$u.email).ToLowerInvariant()
+      $now = NowMs
+      $list = @()
+      foreach ($cid in @($Script:Calls.Keys)) {
+        $c = $Script:Calls[$cid]
+        $from = ([string]$c.from).ToLowerInvariant()
+        $to = ([string]$c.to).ToLowerInvariant()
+        if ($from -ne $myEmail -and $to -ne $myEmail) { continue }
+        if ([long]$c.touchedAt -le $since) { continue }
+        $list += (Public-Call $c $myEmail)
+      }
+      Send-Json $resp @{ calls = @($list); now = $now }
+      return $true
+    }
+
+    # Callee accepts or declines a pending request.
+    'POST /api/cam/respond' {
+      $u = Require-Auth $req $resp $db
+      if (-not $u) { return $true }
+      Prune-Calls
+      $body = Read-JsonBody $req
+      $id = ("$($body.id)").Trim()
+      $accept = $false
+      if ($body.PSObject.Properties['accept'] -or ($body -is [hashtable] -and $body.ContainsKey('accept'))) {
+        $accept = [bool]$body.accept
+      }
+      $call = Get-CallById $id
+      if (-not $call) { Send-Json $resp @{ error = 'Call not found.' } 404; return $true }
+      $myEmail = ([string]$u.email).ToLowerInvariant()
+      if (([string]$call.to).ToLowerInvariant() -ne $myEmail) {
+        Send-Json $resp @{ error = 'You cannot respond to this call.' } 403
+        return $true
+      }
+      if (([string]$call.status) -ne 'pending') {
+        Send-Json $resp @{ error = ('Call is already ' + $call.status + '.') } 409
+        return $true
+      }
+      if ($accept) { $call.status = 'accepted' } else { $call.status = 'declined' }
+      $call.touchedAt = NowMs
+      Send-Json $resp @{ ok = $true; id = [string]$call.id; status = [string]$call.status }
+      return $true
+    }
+
+    # Append a SDP/ICE/bye payload to the call's signal queue.
+    'POST /api/cam/signal' {
+      $u = Require-Auth $req $resp $db
+      if (-not $u) { return $true }
+      Prune-Calls
+      $body = Read-JsonBody $req
+      $id = ("$($body.id)").Trim()
+      $kind = ("$($body.kind)").Trim().ToLowerInvariant()
+      if ($Script:CallSignalKinds -notcontains $kind) {
+        Send-Json $resp @{ error = 'Invalid signal kind.' } 400
+        return $true
+      }
+      $call = Get-CallById $id
+      if (-not $call) { Send-Json $resp @{ error = 'Call not found.' } 404; return $true }
+      $myEmail = ([string]$u.email).ToLowerInvariant()
+      $from = ([string]$call.from).ToLowerInvariant()
+      $to = ([string]$call.to).ToLowerInvariant()
+      if ($myEmail -ne $from -and $myEmail -ne $to) {
+        Send-Json $resp @{ error = 'You are not part of this call.' } 403
+        return $true
+      }
+      if (([string]$call.status) -ne 'accepted' -and $kind -ne 'bye') {
+        Send-Json $resp @{ error = 'Call is not accepted.' } 409
+        return $true
+      }
+      $call.touchedAt = NowMs
+      if (-not $Script:CallSignals.ContainsKey($id)) { $Script:CallSignals[$id] = @() }
+      $existing = @($Script:CallSignals[$id])
+      $entry = @{
+        seq     = ($existing.Count + 1)
+        at      = NowMs
+        from    = $myEmail
+        kind    = $kind
+        payload = $body.payload
+      }
+      $appended = @($existing) + $entry
+      if ($appended.Count -gt [int]$Script:CallSignalsPerCall) {
+        $cnt = $appended.Count
+        $appended = @($appended[($cnt - [int]$Script:CallSignalsPerCall)..($cnt - 1)])
+      }
+      $Script:CallSignals[$id] = $appended
+      if ($kind -eq 'bye') {
+        $call.status = 'ended'
+      }
+      Send-Json $resp @{ ok = $true; seq = [long]$entry.seq; status = [string]$call.status }
+      return $true
+    }
+
+    # Long-poll target: returns signals from the OTHER side newer than
+    # the caller's `since` cursor.
+    'GET /api/cam/signal' {
+      $u = Require-Auth $req $resp $db
+      if (-not $u) { return $true }
+      Prune-Calls
+      $id = ''
+      $since = 0
+      if ($req.Url.Query) {
+        $q = [System.Web.HttpUtility]::ParseQueryString($req.Url.Query)
+        if ($q['id'])    { $id = [string]$q['id'] }
+        if ($q['since']) { $since = [long]$q['since'] }
+      }
+      if (-not $id) { Send-Json $resp @{ error = 'id is required.' } 400; return $true }
+      $call = Get-CallById $id
+      if (-not $call) { Send-Json $resp @{ error = 'Call not found.' } 404; return $true }
+      $myEmail = ([string]$u.email).ToLowerInvariant()
+      $from = ([string]$call.from).ToLowerInvariant()
+      $to = ([string]$call.to).ToLowerInvariant()
+      if ($myEmail -ne $from -and $myEmail -ne $to) {
+        Send-Json $resp @{ error = 'You are not part of this call.' } 403
+        return $true
+      }
+      $sigs = @()
+      if ($Script:CallSignals.ContainsKey($id)) {
+        foreach ($s in @($Script:CallSignals[$id])) {
+          if ([long]$s.seq -le $since) { continue }
+          # Only deliver signals authored by the OTHER side.
+          if (([string]$s.from).ToLowerInvariant() -eq $myEmail) { continue }
+          $sigs += @{
+            seq     = [long]$s.seq
+            at      = [long]$s.at
+            from    = [string]$s.from
+            kind    = [string]$s.kind
+            payload = $s.payload
+          }
+        }
+      }
+      $call.touchedAt = NowMs
+      Send-Json $resp @{
+        id      = [string]$call.id
+        status  = [string]$call.status
+        signals = @($sigs)
+      }
+      return $true
+    }
+
+    # Either side ends the call. The signal queue stays in memory until
+    # Prune-Calls drops it (so trailing 'bye' signals can still be read).
+    'POST /api/cam/end' {
+      $u = Require-Auth $req $resp $db
+      if (-not $u) { return $true }
+      $body = Read-JsonBody $req
+      $id = ("$($body.id)").Trim()
+      $call = Get-CallById $id
+      if (-not $call) {
+        Send-Json $resp @{ ok = $true; id = $id; alreadyEnded = $true }
+        return $true
+      }
+      $myEmail = ([string]$u.email).ToLowerInvariant()
+      $from = ([string]$call.from).ToLowerInvariant()
+      $to = ([string]$call.to).ToLowerInvariant()
+      if ($myEmail -ne $from -and $myEmail -ne $to) {
+        Send-Json $resp @{ error = 'You are not part of this call.' } 403
+        return $true
+      }
+      $call.status = 'ended'
+      $call.touchedAt = NowMs
+      Send-Json $resp @{ ok = $true; id = [string]$call.id; status = 'ended' }
       return $true
     }
   }

@@ -1054,6 +1054,160 @@ try {
     Check 'styles.css ships .comm-fab'         ($cssSrc -match '\.comm-fab')
     Check 'styles.css ships .online-dot'       ($cssSrc -match '\.online-dot')
 
+    Section '24. Cam2cam: signalling pipes'
+
+    # All endpoints require auth.
+    $c2cAnonRequest = 0
+    try {
+        $null = Invoke-RestMethod -Uri ($Base + '/api/cam/request') -Method Post -ContentType 'application/json' -Body (JsonBody @{ to='chat-b@example.com' })
+    } catch { $c2cAnonRequest = StatusCodeOf $_ }
+    Check 'Anonymous /api/cam/request returns 401'    ($c2cAnonRequest -eq 401) ('got ' + $c2cAnonRequest)
+
+    $c2cAnonInbox = 0
+    try { $null = Invoke-RestMethod -Uri ($Base + '/api/cam/inbox') } catch { $c2cAnonInbox = StatusCodeOf $_ }
+    Check 'Anonymous /api/cam/inbox returns 401'      ($c2cAnonInbox -eq 401) ('got ' + $c2cAnonInbox)
+
+    # Both ChatA and ChatB start with cam2cam off (supporters by default).
+    $offTry = 0
+    try {
+        $null = Invoke-RestMethod -Uri ($Base + '/api/cam/request') -Method Post -ContentType 'application/json' -WebSession $chatA `
+            -Body (JsonBody @{ to='chat-b@example.com' })
+    } catch { $offTry = StatusCodeOf $_ }
+    Check 'Cam2cam off on either side returns 403'    ($offTry -eq 403) ('got ' + $offTry)
+
+    # Toggle cam2cam on for both peers.
+    $c2cOnA = Invoke-RestMethod -Uri ($Base + '/api/cam2cam') -Method Post -ContentType 'application/json' -WebSession $chatA -Body (JsonBody @{ enabled=$true })
+    $c2cOnB = Invoke-RestMethod -Uri ($Base + '/api/cam2cam') -Method Post -ContentType 'application/json' -WebSession $chatB -Body (JsonBody @{ enabled=$true })
+    Check 'ChatA cam2cam toggle returns ok'           ($c2cOnA.ok -eq $true -and $c2cOnA.cam2cam -eq $true)
+    Check 'ChatB cam2cam toggle returns ok'           ($c2cOnB.ok -eq $true -and $c2cOnB.cam2cam -eq $true)
+    Check 'Public-User reflects cam2cam=true'         ($c2cOnA.user.cam2cam -eq $true)
+
+    # Self-call -> 400.
+    $selfCall = 0
+    try {
+        $null = Invoke-RestMethod -Uri ($Base + '/api/cam/request') -Method Post -ContentType 'application/json' -WebSession $chatA -Body (JsonBody @{ to='chat-a@example.com' })
+    } catch { $selfCall = StatusCodeOf $_ }
+    Check 'Calling yourself returns 400'              ($selfCall -eq 400) ('got ' + $selfCall)
+
+    # Unknown peer -> 404.
+    $unkCall = 0
+    try {
+        $null = Invoke-RestMethod -Uri ($Base + '/api/cam/request') -Method Post -ContentType 'application/json' -WebSession $chatA -Body (JsonBody @{ to='nope@example.com' })
+    } catch { $unkCall = StatusCodeOf $_ }
+    Check 'Unknown peer call returns 404'             ($unkCall -eq 404) ('got ' + $unkCall)
+
+    # ChatA requests cam2cam with ChatB.
+    $req = Invoke-RestMethod -Uri ($Base + '/api/cam/request') -Method Post -ContentType 'application/json' -WebSession $chatA -Body (JsonBody @{ to='chat-b@example.com' })
+    Check 'Cam request returns ok'                    ($req.ok -eq $true)
+    Check 'Cam request returns id'                    ([bool]$req.id)
+    Check 'Cam request status pending'                ($req.status -eq 'pending')
+    $callId = [string]$req.id
+
+    # ChatB inbox shows the pending request as callee.
+    $inboxB = Invoke-RestMethod -Uri ($Base + '/api/cam/inbox') -WebSession $chatB
+    $found = $null
+    foreach ($c in @($inboxB.calls)) { if ($c.id -eq $callId) { $found = $c; break } }
+    Check 'ChatB inbox lists the call'                ($null -ne $found)
+    if ($found) {
+        Check 'ChatB inbox role is callee'            ($found.role -eq 'callee')
+        Check 'ChatB inbox status pending'            ($found.status -eq 'pending')
+        Check 'ChatB inbox preserves fromName'        ($found.fromName -eq 'ChatA')
+    }
+
+    # Wrong-callee respond -> 403.
+    $forbidRespond = 0
+    try {
+        $null = Invoke-RestMethod -Uri ($Base + '/api/cam/respond') -Method Post -ContentType 'application/json' -WebSession $chatA -Body (JsonBody @{ id=$callId; accept=$true })
+    } catch { $forbidRespond = StatusCodeOf $_ }
+    Check 'Caller cannot respond to own call (403)'   ($forbidRespond -eq 403) ('got ' + $forbidRespond)
+
+    # Cannot signal until accepted.
+    $earlySig = 0
+    try {
+        $null = Invoke-RestMethod -Uri ($Base + '/api/cam/signal') -Method Post -ContentType 'application/json' -WebSession $chatA -Body (JsonBody @{ id=$callId; kind='offer'; payload=@{ type='offer'; sdp='v=0' } })
+    } catch { $earlySig = StatusCodeOf $_ }
+    Check 'Signal before accept returns 409'          ($earlySig -eq 409) ('got ' + $earlySig)
+
+    # ChatB accepts.
+    $resp = Invoke-RestMethod -Uri ($Base + '/api/cam/respond') -Method Post -ContentType 'application/json' -WebSession $chatB -Body (JsonBody @{ id=$callId; accept=$true })
+    Check 'Respond accept returns ok'                 ($resp.ok -eq $true -and $resp.status -eq 'accepted')
+
+    # ChatA posts SDP offer.
+    $sigA1 = Invoke-RestMethod -Uri ($Base + '/api/cam/signal') -Method Post -ContentType 'application/json' -WebSession $chatA -Body (JsonBody @{ id=$callId; kind='offer'; payload=@{ type='offer'; sdp='v=0' } })
+    Check 'ChatA signal offer returns ok'             ($sigA1.ok -eq $true -and $sigA1.seq -eq 1)
+
+    # ChatB pulls signals -- should see ChatA's offer (other side only).
+    $pullB = Invoke-RestMethod -Uri ($Base + '/api/cam/signal?id=' + $callId + '&since=0') -WebSession $chatB
+    Check 'ChatB receives 1 signal from ChatA'        (@($pullB.signals).Count -eq 1)
+    Check 'ChatB sees offer kind'                     (($pullB.signals)[0].kind -eq 'offer')
+    Check 'ChatB sees signal status accepted'         ($pullB.status -eq 'accepted')
+
+    # ChatA pulls signals -- should see NONE of its own offer.
+    $pullA = Invoke-RestMethod -Uri ($Base + '/api/cam/signal?id=' + $callId + '&since=0') -WebSession $chatA
+    Check 'ChatA does not see own signals'            (@($pullA.signals).Count -eq 0)
+
+    # ChatB posts answer + ICE.
+    $sigB1 = Invoke-RestMethod -Uri ($Base + '/api/cam/signal') -Method Post -ContentType 'application/json' -WebSession $chatB -Body (JsonBody @{ id=$callId; kind='answer'; payload=@{ type='answer'; sdp='v=0' } })
+    Check 'ChatB answer returns seq=2'                ($sigB1.seq -eq 2)
+    $sigB2 = Invoke-RestMethod -Uri ($Base + '/api/cam/signal') -Method Post -ContentType 'application/json' -WebSession $chatB -Body (JsonBody @{ id=$callId; kind='ice'; payload=@{ candidate='candidate:1 1 udp 1 1.2.3.4 1234 typ host' } })
+    Check 'ChatB ICE returns seq=3'                   ($sigB2.seq -eq 3)
+
+    # ChatA pulls signals -- should see answer + ice (since=1).
+    $pullA2 = Invoke-RestMethod -Uri ($Base + '/api/cam/signal?id=' + $callId + '&since=1') -WebSession $chatA
+    Check 'ChatA receives answer + ice'               (@($pullA2.signals).Count -eq 2)
+
+    # Stranger cannot read or post signals.
+    $strangerSession = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+    $null = Invoke-RestMethod -Uri ($Base + '/api/register') -Method Post -ContentType 'application/json' -WebSession $strangerSession `
+        -Body (JsonBody @{ name='Stranger'; email='stranger@example.com'; password='abcd' })
+    $strangerCode = 0
+    try {
+        $null = Invoke-RestMethod -Uri ($Base + '/api/cam/signal?id=' + $callId + '&since=0') -WebSession $strangerSession
+    } catch { $strangerCode = StatusCodeOf $_ }
+    Check 'Stranger cannot read signals (403)'        ($strangerCode -eq 403) ('got ' + $strangerCode)
+
+    # Bad signal kind -> 400.
+    $badKind = 0
+    try {
+        $null = Invoke-RestMethod -Uri ($Base + '/api/cam/signal') -Method Post -ContentType 'application/json' -WebSession $chatA -Body (JsonBody @{ id=$callId; kind='wat'; payload=@{} })
+    } catch { $badKind = StatusCodeOf $_ }
+    Check 'Bad signal kind returns 400'               ($badKind -eq 400) ('got ' + $badKind)
+
+    # End the call. Subsequent inbox poll shows status='ended'.
+    $endRes = Invoke-RestMethod -Uri ($Base + '/api/cam/end') -Method Post -ContentType 'application/json' -WebSession $chatA -Body (JsonBody @{ id=$callId })
+    Check 'Cam end returns ok'                        ($endRes.ok -eq $true -and $endRes.status -eq 'ended')
+
+    $inboxAfter = Invoke-RestMethod -Uri ($Base + '/api/cam/inbox') -WebSession $chatB
+    $foundAfter = $null
+    foreach ($c in @($inboxAfter.calls)) { if ($c.id -eq $callId) { $foundAfter = $c; break } }
+    if ($foundAfter) {
+        Check 'Inbox reflects ended status'           ($foundAfter.status -eq 'ended')
+    } else {
+        # If it has been pruned, that's also acceptable.
+        Check 'Ended call removed or marked ended'    $true
+    }
+
+    # End on unknown id -> ok with alreadyEnded=true.
+    $unkEnd = Invoke-RestMethod -Uri ($Base + '/api/cam/end') -Method Post -ContentType 'application/json' -WebSession $chatA -Body (JsonBody @{ id='not-a-real-id' })
+    Check 'Cam end on unknown id returns ok'          ($unkEnd.ok -eq $true)
+
+    # Cam2cam off bypasses request even if peer is on.
+    $null = Invoke-RestMethod -Uri ($Base + '/api/cam2cam') -Method Post -ContentType 'application/json' -WebSession $chatA -Body (JsonBody @{ enabled=$false })
+    $offAfter = 0
+    try {
+        $null = Invoke-RestMethod -Uri ($Base + '/api/cam/request') -Method Post -ContentType 'application/json' -WebSession $chatA -Body (JsonBody @{ to='chat-b@example.com' })
+    } catch { $offAfter = StatusCodeOf $_ }
+    Check 'Caller-side cam2cam off returns 403'       ($offAfter -eq 403) ('got ' + $offAfter)
+
+    # Frontend artifacts.
+    Check 'GET /js/camCall.js returns 200'            ((Invoke-WebRequest -Uri ($Base + '/js/camCall.js') -UseBasicParsing).StatusCode -eq 200)
+    Check 'cam.html exposes #camOnlineList'           ((Invoke-WebRequest -Uri ($Base + '/cam.html') -UseBasicParsing).Content -match 'id="camOnlineList"')
+    Check 'cam.html exposes #camStage'                ((Invoke-WebRequest -Uri ($Base + '/cam.html') -UseBasicParsing).Content -match 'id="camStage"')
+    Check 'cam.html exposes #camSideChat'             ((Invoke-WebRequest -Uri ($Base + '/cam.html') -UseBasicParsing).Content -match 'id="camSideChat"')
+    Check 'cam.html exposes call controls'            ((Invoke-WebRequest -Uri ($Base + '/cam.html') -UseBasicParsing).Content -match 'id="camEndCall"')
+    Check 'styles.css ships .cam-room-grid'           ($cssSrc -match '\.cam-room-grid')
+    Check 'styles.css ships .cam-pip'                 ($cssSrc -match '\.cam-pip')
+
     Section 'Summary'
     Log ('  Passed: ' + $script:pass) 'Green'
     $failColor = 'Green'

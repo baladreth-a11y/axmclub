@@ -162,7 +162,40 @@ try {
   Ok 'Public-User exposes dmPolicy'                ($signedMe.user.dmPolicy -in @('open','mutual','closed'))
 
   Write-Host ""
-  Write-Host ("== Manual verify summary: " + $pass + ' passed, ' + $fail + ' failed ==') -ForegroundColor $(if ($fail) { 'Red' } else { 'Green' })
+  Write-Host "== 13. Cam2cam page elements ==" -ForegroundColor Cyan
+  $camHtml = Invoke-WebRequest -Uri ($Base + '/cam.html') -UseBasicParsing
+  Ok 'GET /cam.html returns 200'                  ($camHtml.StatusCode -eq 200)
+  Ok 'cam.html has #camOnlineList'                ($camHtml.Content -match 'id="camOnlineList"')
+  Ok 'cam.html has #camStage'                     ($camHtml.Content -match 'id="camStage"')
+  Ok 'cam.html has #camSideChat'                  ($camHtml.Content -match 'id="camSideChat"')
+  Ok 'cam.html has #camEndCall control'           ($camHtml.Content -match 'id="camEndCall"')
+  Ok 'cam.html has cam2cam toggle'                ($camHtml.Content -match 'id="camC2cToggle"')
+  Ok 'cam.html has incoming accept button'        ($camHtml.Content -match 'id="camIncomingAccept"')
+
+  $camCallJs = Invoke-WebRequest -Uri ($Base + '/js/camCall.js') -UseBasicParsing
+  Ok 'GET /js/camCall.js returns 200'             ($camCallJs.StatusCode -eq 200)
+  Ok 'camCall.js exports startCall'               ($camCallJs.Content -match 'export\s+(?:async\s+)?function\s+startCall')
+  Ok 'camCall.js exports endCall'                 ($camCallJs.Content -match 'export\s+(?:async\s+)?function\s+endCall')
+
+  Ok 'styles.css ships .cam-room-grid'            ($cssBody -match '\.cam-room-grid')
+  Ok 'styles.css ships .cam-pip'                  ($cssBody -match '\.cam-pip')
+  Ok 'styles.css ships .btn-danger'               ($cssBody -match '\.btn-danger')
+
+  $camAnonReq = 0
+  try { $null = Invoke-RestMethod -Uri ($Base + '/api/cam/request') -Method Post -ContentType 'application/json' -Body (@{ to='nobody@example.com' } | ConvertTo-Json) } catch { $camAnonReq = Code $_ }
+  Ok 'Anonymous /api/cam/request returns 401'      ($camAnonReq -eq 401) ('got ' + $camAnonReq)
+
+  $camAnonInbox = 0
+  try { $null = Invoke-RestMethod -Uri ($Base + '/api/cam/inbox') } catch { $camAnonInbox = Code $_ }
+  Ok 'Anonymous /api/cam/inbox returns 401'        ($camAnonInbox -eq 401) ('got ' + $camAnonInbox)
+
+  $cam2camToggle = Invoke-RestMethod -Uri ($Base + '/api/cam2cam') -Method Post -ContentType 'application/json' -WebSession $sess -Body (@{ enabled=$true } | ConvertTo-Json)
+  Ok 'cam2cam toggle returns ok'                   ($cam2camToggle.ok -eq $true -and $cam2camToggle.cam2cam -eq $true)
+
+  Write-Host ""
+  $color = 'Green'
+  if ($fail -ne 0) { $color = 'Red' }
+  Write-Host ("== Manual verify summary: " + $pass + ' passed, ' + $fail + ' failed ==') -ForegroundColor $color
 }
 finally {
   try { Stop-Process -Id $sp.Id -Force -ErrorAction SilentlyContinue } catch {}

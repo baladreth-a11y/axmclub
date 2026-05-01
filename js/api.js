@@ -59,6 +59,15 @@ export const api = {
   camStatus:         () => request('/api/cam/status'),
   camRedeemPassword: password => request('/api/cam/redeem-password', { method: 'POST', body: { password } }),
 
+  // Cam2cam signalling. All require auth; both peers must have cam2cam=true.
+  setCam2cam:    enabled => request('/api/cam2cam',     { method: 'POST', body: { enabled: !!enabled } }),
+  camRequest:    to       => request('/api/cam/request', { method: 'POST', body: { to } }),
+  camInbox:      (since = 0) => request('/api/cam/inbox?since=' + (since | 0)),
+  camRespond:    (id, accept) => request('/api/cam/respond', { method: 'POST', body: { id, accept: !!accept } }),
+  camSignal:     (id, kind, payload) => request('/api/cam/signal', { method: 'POST', body: { id, kind, payload } }),
+  camSignalGet:  (id, since = 0) => request('/api/cam/signal?id=' + encodeURIComponent(id) + '&since=' + (since | 0)),
+  camEnd:        id => request('/api/cam/end', { method: 'POST', body: { id } }),
+
   tasks:             () => request('/api/tasks'),
   claimTask:         taskId => request('/api/tasks/claim', { method: 'POST', body: { taskId } }),
 

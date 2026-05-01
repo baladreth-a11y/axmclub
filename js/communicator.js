@@ -6,6 +6,7 @@
 import { api } from './api.js';
 import { store } from './store.js';
 import { toast } from './ui.js';
+import { startCall } from './camCall.js';
 
 const POLL_THREADS_MS  = 8000;
 const POLL_MESSAGES_MS = 3000;
@@ -355,6 +356,15 @@ function closePanel() {
   // keep the threads timer running so the unread badge stays current.
 }
 
+// Programmatic entry point: open the panel and pre-load `peerEmail`.
+// Used by the cam room's side-chat helper button.
+export function openCommunicatorWith(peerEmail, peerName) {
+  const fab = document.getElementById('commFab');
+  if (!fab) return;
+  if (!panelOpen) fab.click();
+  if (peerEmail) showChatView(peerEmail, peerName || peerEmail);
+}
+
 export function initCommunicator() {
   if (document.getElementById('commFab')) return;
   const host = document.createElement('div');
@@ -392,9 +402,27 @@ export function initCommunicator() {
   $('#commComposeForm').addEventListener('submit', onSend);
   $('#commComposeText').addEventListener('keydown', onComposeKey);
 
-  $('#commCam2cam').addEventListener('click', () => {
-    // Cam2cam wiring lands in Phase 3; stub a friendly toast for now.
-    toast('Cam2cam requests are coming with the cam-room redesign.');
+  $('#commCam2cam').addEventListener('click', async () => {
+    if (!openWith) return;
+    const me = store.get().user;
+    if (!me)             { toast('Sign in first.', 'info'); return; }
+    if (!me.cam2cam)     { toast('Turn on cam2cam from the cam room first.', 'info'); return; }
+    if (!peerCam2cam)    { toast('Peer hasn\u2019t enabled cam2cam.', 'info'); return; }
+    try {
+      const peerName = $('#commPeerName')?.textContent || openWith;
+      await startCall(openWith, peerName);
+      toast(`Cam2cam request sent to ${peerName}. Open the cam room to continue.`);
+      // If we're not on the cam page, send the user there.
+      if (!/cam\.html$/i.test(location.pathname)) {
+        setTimeout(() => { location.href = '/cam.html'; }, 600);
+      }
+    } catch (err) {
+      if (err.status === 403 && err.data && err.data.reason === 'cam2cam-off') {
+        toast('Both sides need cam2cam enabled.', 'info');
+      } else {
+        toast(err.message || 'Could not send cam2cam request.', 'error');
+      }
+    }
   });
 
   // React to user state changes.

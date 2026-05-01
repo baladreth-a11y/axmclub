@@ -26,7 +26,12 @@ export const store = createStore({
   leaderboard: [],
   rewards: [],
   tasks: [],
-  cam: { active: false, expiresAt: 0, remainingMs: 0 },
+  cam: {
+    active: false, expiresAt: 0, remainingMs: 0,
+    // Active cam2cam call. status: 'idle' | 'requesting' | 'incoming' |
+    // 'connecting' | 'live' | 'ended' | 'failed'.
+    call: { id: '', status: 'idle', peerEmail: '', peerName: '', startedAt: 0, error: '' }
+  },
   // Communicator: presence + 1:1 chat panel state.
   online: [],
   chat: { threads: [], openWith: '', messages: [], unread: 0, peerOnline: false, peerCam2cam: false }
