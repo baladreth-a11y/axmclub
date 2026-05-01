@@ -267,7 +267,7 @@ try {
     $html = Invoke-WebRequest -Uri ($Base + '/') -UseBasicParsing
     Check 'GET / returns 200' ($html.StatusCode -eq 200)
     Check 'GET / contains AxMclub brand' ($html.Content -match 'AxMclub')
-    Check 'GET / contains #supporters section' ($html.Content -match 'id="supporters"')
+    Check 'GET / drops #supporters section'    (-not ($html.Content -match 'id="supporters"'))
     Check 'GET / contains profile modal view' ($html.Content -match 'data-view="profile"')
 
     $js = Invoke-WebRequest -Uri ($Base + '/js/main.js') -UseBasicParsing
@@ -300,12 +300,16 @@ try {
     }
     Check 'DB file not servable (403)' ($forbidden -eq 403) ('got ' + $forbidden)
 
-    Check 'GET / contains #marketplace section'   ($html.Content -match 'id="marketplace"')
-    Check 'GET / contains #camroom section'       ($html.Content -match 'id="camroom"')
-    Check 'GET / contains #tasks section'         ($html.Content -match 'id="tasks"')
+    # Home page is trimmed to a model-gallery landing. The other sections
+    # live on dedicated pages (/play.html, /marketplace.html, /cam.html,
+    # /supporters.html). Only #players + the AxMcamPlayers banner stay
+    # on /; the rest is reachable via the navbar.
     Check 'GET / contains #players section'       ($html.Content -match 'id="players"')
-    Check 'GET / contains #party-roster section'  ($html.Content -match 'id="party-roster"')
     Check 'GET / contains AxMcamPlayers banner'   ($html.Content -match 'AxM.*cam.*Players')
+    Check 'GET / drops #marketplace section'      (-not ($html.Content -match 'id="marketplace"'))
+    Check 'GET / drops #camroom section'          (-not ($html.Content -match 'id="camroom"'))
+    Check 'GET / drops #tasks section'            (-not ($html.Content -match 'id="tasks"'))
+    Check 'GET / drops #party-roster section'     (-not ($html.Content -match 'id="party-roster"'))
     Check 'GET / has Support & Rewards dropdown'  ($html.Content -match 'nav-dropdown-toggle')
     Check 'GET / has gate overlay element'        ($html.Content -match 'id="gate"')
     Check 'GET / has account-type segment'        ($html.Content -match 'class="acct-segment"')
