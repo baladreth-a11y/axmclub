@@ -25,8 +25,10 @@ import { initGate } from './gate.js';
 import { initHeader } from './header.js';
 import { initHeroStats } from './heroStats.js';
 import { initAuth } from './auth.js';
+import { initProfile } from './profile.js';
 import { initModels } from './models.js';
 import { initVerifyBanner } from './verify.js';
+import { initOnboarding } from './onboarding.js';
 import { initFeedback } from './feedback.js';
 import { initCommunicator } from './communicator.js';
 import { api } from './api.js';
@@ -147,6 +149,48 @@ const modalMarkup = `
         </form>
       </div>
 
+      <div class="modal-view hidden onboarding" data-view="onboarding">
+        <span class="eyebrow">Next steps</span>
+        <h3 id="onboardingTitle">Welcome to AxMclub</h3>
+        <p id="onboardingIntro" class="muted">Your account is ready. Here are the fastest ways to get value from the club.</p>
+        <ol class="onboarding-list">
+          <li id="onboardingStepAccount" class="onboarding-step">
+            <span class="onboarding-step-marker" aria-hidden="true"></span>
+            <div>
+              <strong>Account created</strong>
+              <span>Your member profile is active and saved for this device.</span>
+            </div>
+          </li>
+          <li id="onboardingStepVerify" class="onboarding-step">
+            <span class="onboarding-step-marker" aria-hidden="true"></span>
+            <div>
+              <strong>Verify your email</strong>
+              <span>Unlock full model profiles and keep your account recoverable.</span>
+            </div>
+          </li>
+          <li id="onboardingStepSpin" class="onboarding-step">
+            <span class="onboarding-step-marker" aria-hidden="true"></span>
+            <div>
+              <strong>Claim your daily spin</strong>
+              <span>Start earning points toward rewards and tier progress.</span>
+            </div>
+          </li>
+          <li id="onboardingStepExplore" class="onboarding-step">
+            <span class="onboarding-step-marker" aria-hidden="true"></span>
+            <div>
+              <strong>Browse the roster</strong>
+              <span>Find models, socials, and the next cam-room destination.</span>
+            </div>
+          </li>
+        </ol>
+        <div class="onboarding-actions">
+          <button id="onboardingVerifyBtn" class="btn btn-primary" type="button">Send verification email</button>
+          <a class="btn btn-outline" href="/play.html#roulette">Daily spin</a>
+          <a class="btn btn-outline" href="/players.html">Browse models</a>
+        </div>
+        <button id="onboardingDoneBtn" class="btn btn-ghost btn-block" type="button">I'll do this later</button>
+      </div>
+
       <div class="modal-view hidden" data-view="tokens">
         <h3>Get tokens</h3>
         <p class="muted">Tokens are the club's real currency. Pick a pack below.</p>
@@ -196,22 +240,37 @@ const modalMarkup = `
             <p class="muted" id="profileEmail">email@example.com</p>
             <div class="profile-badges">
               <span class="badge badge-gold" id="profileTier">Silver tier</span>
+              <span class="badge badge-muted" id="profileVerified">Email unverified</span>
               <span class="badge badge-accent hidden" id="profileStreak">🔥 0-day streak</span>
             </div>
           </div>
         </div>
         <div class="profile-stats">
           <div class="profile-stat">
-            <span class="label">Balance</span>
+            <span class="label">Rank</span>
+            <strong id="profileRank">Unranked</strong>
+          </div>
+          <div class="profile-stat">
+            <span class="label">Level</span>
+            <strong id="profileLevel">0</strong>
+          </div>
+          <div class="profile-stat">
+            <span class="label">Points</span>
             <strong id="profilePoints">0</strong>
           </div>
           <div class="profile-stat">
+            <span class="label">Tokens</span>
+            <strong id="profileTokens">0</strong>
+          </div>
+        </div>
+        <div class="profile-meta-grid">
+          <div>
             <span class="label">Member since</span>
             <strong id="profileJoined">—</strong>
           </div>
-          <div class="profile-stat">
+          <div>
             <span class="label">Last spin</span>
-            <strong id="profileLastSpin">—</strong>
+            <strong id="profileLastSpin">Never</strong>
           </div>
         </div>
         <div class="profile-progress">
@@ -287,7 +346,9 @@ export function initSharedLayout({ activePage = null } = {}) {
   initHeader();
   if ($('#statMembers')) initHeroStats();
   initAuth();
+  initProfile();
   initVerifyBanner();
+  initOnboarding();
   // Pages that include a `#modelsGrid` placeholder get the dynamic
   // gallery rendered into it. Otherwise this is a no-op.
   initModels();

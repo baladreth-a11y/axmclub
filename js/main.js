@@ -16,6 +16,7 @@ import { initGate } from './gate.js';
 import { initUserWidget } from './userWidget.js';
 import { initModels } from './models.js';
 import { initVerifyBanner } from './verify.js';
+import { initOnboarding } from './onboarding.js';
 
 // -------- Global error boundary ---------------------------------
 // Any uncaught JS error or unhandled promise rejection in the site
@@ -50,6 +51,7 @@ async function bootstrap() {
   initUserWidget();
   initModels();
   initVerifyBanner();
+  initOnboarding();
 
   // Initial data load. Don't block UI on failures.
   const [meRes, statsRes] = await Promise.allSettled([api.me(), api.stats()]);

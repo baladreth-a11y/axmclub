@@ -3,38 +3,66 @@ import { store } from './store.js';
 import { api } from './api.js';
 import { registerView } from './modal.js';
 
+function setText(sel, value) {
+  const el = $(sel);
+  if (el) el.textContent = value;
+}
+
+function setHidden(sel, hidden) {
+  const el = $(sel);
+  if (el) el.classList.toggle('hidden', !!hidden);
+}
+
 function renderHeader() {
   const { user } = store.get();
   if (!user) return;
 
-  $('#profileAvatar').textContent = (user.name[0] || 'U').toUpperCase();
-  $('#profileName').textContent = user.name;
-  $('#profileEmail').textContent = user.email;
-  $('#profileTier').textContent = (user.tier || tierFor(user.points)) + ' tier';
-  $('#profilePoints').textContent = (user.points || 0).toLocaleString();
-  $('#profileJoined').textContent = formatDate(user.joined);
-  $('#profileLastSpin').textContent = formatRelative(user.lastSpin);
+  const points = user.points || 0;
+  const tokens = user.tokens || 0;
+  const level = user.level || (points + tokens);
+  const rank = (user.rank || '').trim() || 'Unranked';
+  const tier = user.tier || tierFor(points);
 
-  const streak = user.streak || 0;
-  const streakEl = $('#profileStreak');
-  if (streak > 0) {
-    streakEl.classList.remove('hidden');
-    streakEl.textContent = `🔥 ${streak}-day streak`;
-  } else {
-    streakEl.classList.add('hidden');
+  setText('#profileAvatar', (user.name[0] || 'U').toUpperCase());
+  setText('#profileName', user.name);
+  setText('#profileEmail', user.email);
+  setText('#profileTier', tier + ' tier');
+  setText('#profileRank', rank);
+  setText('#profileLevel', level.toLocaleString());
+  setText('#profilePoints', points.toLocaleString());
+  setText('#profileTokens', tokens.toLocaleString());
+  setText('#profileJoined', formatDate(user.joined));
+  setText('#profileLastSpin', formatRelative(user.lastSpin));
+
+  const verifiedEl = $('#profileVerified');
+  if (verifiedEl) {
+    const verified = user.emailVerified === true;
+    verifiedEl.textContent = verified ? 'Email verified' : 'Email unverified';
+    verifiedEl.classList.toggle('badge-gold', verified);
+    verifiedEl.classList.toggle('badge-muted', !verified);
   }
 
-  const info = nextTierInfo(user.points || 0);
-  $('#profileNextTier').textContent = info.next;
+  const streak = user.streak || 0;
+  if (streak > 0) {
+    setHidden('#profileStreak', false);
+    setText('#profileStreak', `🔥 ${streak}-day streak`);
+  } else {
+    setHidden('#profileStreak', true);
+  }
+
+  const info = nextTierInfo(points);
+  setText('#profileNextTier', info.next);
   if (info.done) {
-    $('#profileProgressText').textContent = 'Top tier reached';
-    $('#profileProgressFill').style.width = '100%';
+    setText('#profileProgressText', 'Top tier reached');
+    const fill = $('#profileProgressFill');
+    if (fill) fill.style.width = '100%';
   } else {
     const span = info.target - info.start;
-    const have = Math.max(0, (user.points || 0) - info.start);
+    const have = Math.max(0, points - info.start);
     const pct  = Math.min(100, Math.round((have / span) * 100));
-    $('#profileProgressText').textContent = `${have.toLocaleString()} / ${span.toLocaleString()}`;
-    $('#profileProgressFill').style.width = pct + '%';
+    setText('#profileProgressText', `${have.toLocaleString()} / ${span.toLocaleString()}`);
+    const fill = $('#profileProgressFill');
+    if (fill) fill.style.width = pct + '%';
   }
 }
 

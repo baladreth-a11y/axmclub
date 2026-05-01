@@ -20,8 +20,11 @@ function ensureBanner() {
   banner.className = 'verify-banner hidden';
   banner.innerHTML = `
     <div class="container verify-banner-inner">
-      <span>Verify your email to view full model profiles.</span>
-      <button id="verifyResendBtn" class="btn btn-outline" type="button">Send verification email</button>
+      <div class="verify-banner-copy">
+        <strong>Email verification needed</strong>
+        <span>Verify your email to unlock full model profiles and protect your account.</span>
+      </div>
+      <button id="verifyResendBtn" class="btn btn-outline" type="button">Send email</button>
     </div>`;
   // Insert after the navbar so it sits in the natural flow.
   const nav = document.querySelector('.navbar');

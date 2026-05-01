@@ -4,6 +4,7 @@ import { store } from './store.js';
 import { toast } from './ui.js';
 import { openModal, closeModal } from './modal.js';
 import { refreshLeaderboard } from './leaderboard.js';
+import { showOnboarding } from './onboarding.js';
 
 async function doLogout() {
   try { await api.logout(); } catch { /* ignore */ }
@@ -47,10 +48,11 @@ export function initAuth() {
         accountType: fd.get('accountType') || 'supporter'
       });
       store.set({ user });
-      closeModal(); e.target.reset();
+      e.target.reset();
       refreshStats();
       refreshLeaderboard();
       toast('Welcome to AxMclub!', 'success');
+      showOnboarding('register');
     } catch (err) { toast(err.message, 'error'); }
   });
 
@@ -63,9 +65,14 @@ export function initAuth() {
         password: fd.get('password')
       });
       store.set({ user });
-      closeModal(); e.target.reset();
+      e.target.reset();
       refreshLeaderboard();
       toast(`Welcome back, ${user.name}.`, 'success');
+      if (user.emailVerified === false || !user.lastSpin) {
+        showOnboarding('login');
+      } else {
+        closeModal();
+      }
     } catch (err) { toast(err.message, 'error'); }
   });
 
