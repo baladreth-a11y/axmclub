@@ -270,7 +270,7 @@ function New-Salt {
   return [Convert]::ToBase64String($bytes)
 }
 
-function Hash-Password($password, $salt) {
+function Get-PasswordHash($password, $salt) {
   $sha = [Security.Cryptography.SHA256]::Create()
   $bytes = [Text.Encoding]::UTF8.GetBytes("${salt}:${password}")
   return [Convert]::ToBase64String($sha.ComputeHash($bytes))
@@ -598,7 +598,7 @@ function Public-Model-Detail($u) {
 
 # Resolve the on-disk uploads directory for a model and create it on demand.
 # Returns the absolute path. Caller is expected to write under it; the
-# path-traversal guard in Handle-Request still protects the rest of the tree.
+# path-traversal guard in Process-Request still protects the rest of the tree.
 function Get-ModelUploadDir([string]$slug) {
   if (-not $slug) { $slug = 'misc' }
   $dir = Join-Path (Join-Path $UploadsDir 'models') $slug
@@ -774,7 +774,7 @@ function Session-Cookie($sid) {
 #  whether the response was a success or a structured error), and $false
 #  when the route belongs to a different domain.
 #
-#  Handle-Api is the top-level dispatcher that walks the sub-handlers in
+#  Process-Api is the top-level dispatcher that walks the sub-handlers in
 #  order and sends a 404 if none of them claim the route.
 #
 #  Adding a new endpoint:
@@ -838,7 +838,7 @@ function Require-Model($req, $resp, $db) {
 }
 
 # ---- Auth: register / login / logout / me -------------------------------
-function Handle-Auth($req, $resp, $db, $path, $method) {
+function Process-Auth($req, $resp, $db, $path, $method) {
   $key = "$method $path"
   switch ($key) {
 
@@ -870,7 +870,7 @@ function Handle-Auth($req, $resp, $db, $path, $method) {
         return $true
       }
       $salt = New-Salt
-      $hash = Hash-Password $password $salt
+      $hash = Get-PasswordHash $password $salt
       $db.users[$email] = @{
         name          = $name
         email         = $email
@@ -912,7 +912,7 @@ function Handle-Auth($req, $resp, $db, $path, $method) {
         return $true
       }
       $u = $db.users[$email]
-      if ((Hash-Password $password $u.pwSalt) -ne $u.pwHash) {
+      if ((Get-PasswordHash $password $u.pwSalt) -ne $u.pwHash) {
         Send-Json $resp @{ error = 'Invalid email or password.' } 401
         return $true
       }
@@ -942,7 +942,7 @@ function Handle-Auth($req, $resp, $db, $path, $method) {
 }
 
 # ---- Stats --------------------------------------------------------------
-function Handle-Stats($req, $resp, $db, $path, $method) {
+function Process-Stats($req, $resp, $db, $path, $method) {
   if ("$method $path" -eq 'GET /api/stats') {
     Send-Json $resp @{ members = [int]$db.stats.members; spins = [int]$db.stats.spins }
     return $true
@@ -951,7 +951,7 @@ function Handle-Stats($req, $resp, $db, $path, $method) {
 }
 
 # ---- Roulette: spin + history ------------------------------------------
-function Handle-Roulette($req, $resp, $db, $path, $method) {
+function Process-Roulette($req, $resp, $db, $path, $method) {
   $key = "$method $path"
   switch ($key) {
 
@@ -1058,7 +1058,7 @@ function Handle-Roulette($req, $resp, $db, $path, $method) {
 }
 
 # ---- Rewards: list / redeem / redemptions ------------------------------
-function Handle-Rewards($req, $resp, $db, $path, $method) {
+function Process-Rewards($req, $resp, $db, $path, $method) {
   $key = "$method $path"
   switch ($key) {
 
@@ -1181,7 +1181,7 @@ function Handle-Rewards($req, $resp, $db, $path, $method) {
 }
 
 # ---- Economy: tokens/buy + offer ---------------------------------------
-function Handle-Economy($req, $resp, $db, $path, $method) {
+function Process-Economy($req, $resp, $db, $path, $method) {
   $key = "$method $path"
   switch ($key) {
 
@@ -1282,7 +1282,7 @@ function Public-Call($c, [string]$myEmail) {
 }
 
 # ---- Cam room: status / redeem-password / create-password / cam2cam ----
-function Handle-Cam($req, $resp, $db, $path, $method) {
+function Process-Cam($req, $resp, $db, $path, $method) {
   $key = "$method $path"
   switch ($key) {
 
@@ -1617,7 +1617,7 @@ function Handle-Cam($req, $resp, $db, $path, $method) {
 #     offer when its `target` matches their display name (case-insensitive).
 #   * Profile fields (bio, brandColor, socials.*) live on the user record
 #     itself and are exposed by Public-User.
-function Handle-Model($req, $resp, $db, $path, $method) {
+function Process-Model($req, $resp, $db, $path, $method) {
   $key = "$method $path"
   switch ($key) {
 
@@ -1901,7 +1901,7 @@ function Handle-Model($req, $resp, $db, $path, $method) {
 }
 
 # ---- Admin: inspect passwords and offers --------------------------------
-function Handle-Admin($req, $resp, $db, $path, $method) {
+function Process-Admin($req, $resp, $db, $path, $method) {
   $key = "$method $path"
   switch ($key) {
 
@@ -2132,7 +2132,7 @@ function Handle-Admin($req, $resp, $db, $path, $method) {
 # Anonymous visitors can browse the cards (Public-Model strips PII), but
 # the per-model detail view (gallery + full bio) requires the caller to be
 # signed in AND have emailVerified == $true.
-function Handle-Models($req, $resp, $db, $path, $method) {
+function Process-Models($req, $resp, $db, $path, $method) {
   if ("$method $path" -eq 'GET /api/models') {
     $list = @()
     foreach ($email in $db.users.Keys) {
@@ -2182,7 +2182,7 @@ function Handle-Models($req, $resp, $db, $path, $method) {
 }
 
 # ---- Email verification: start / confirm -------------------------------
-function Handle-Verify($req, $resp, $db, $path, $method) {
+function Process-Verify($req, $resp, $db, $path, $method) {
   if ("$method $path" -eq 'POST /api/verify/start') {
     $u = Require-Auth $req $resp $db
     if (-not $u) { return $true }
@@ -2252,7 +2252,7 @@ function Handle-Verify($req, $resp, $db, $path, $method) {
 }
 
 # ---- Photo uploads (model-only, multipart): main photo + gallery -------
-function Handle-Uploads($req, $resp, $db, $path, $method) {
+function Process-Uploads($req, $resp, $db, $path, $method) {
   $key = "$method $path"
   switch ($key) {
 
@@ -2385,7 +2385,7 @@ function Handle-Uploads($req, $resp, $db, $path, $method) {
 }
 
 # ---- Tasks: list / claim -----------------------------------------------
-function Handle-Tasks($req, $resp, $db, $path, $method) {
+function Process-Tasks($req, $resp, $db, $path, $method) {
   $key = "$method $path"
   switch ($key) {
 
@@ -2503,7 +2503,7 @@ function Test-FeedbackRate([string]$ip) {
   return $true
 }
 
-function Handle-Feedback($req, $resp, $db, $path, $method) {
+function Process-Feedback($req, $resp, $db, $path, $method) {
   $key = "$method $path"
   switch ($key) {
 
@@ -2685,7 +2685,7 @@ function Public-Online($u) {
   }
 }
 
-function Handle-Chat($req, $resp, $db, $path, $method) {
+function Process-Chat($req, $resp, $db, $path, $method) {
   $key = "$method $path"
   switch ($key) {
 
@@ -2904,7 +2904,7 @@ function Handle-Chat($req, $resp, $db, $path, $method) {
 }
 
 # ---- Community: leaderboard --------------------------------------------
-function Handle-Community($req, $resp, $db, $path, $method) {
+function Process-Community($req, $resp, $db, $path, $method) {
   if ("$method $path" -eq 'GET /api/leaderboard') {
     $arr = @()
     foreach ($email in $db.users.Keys) {
@@ -2922,33 +2922,33 @@ function Handle-Community($req, $resp, $db, $path, $method) {
 }
 
 # ---- Top-level dispatcher ----------------------------------------------
-function Handle-Api($req, $resp, $path, $method) {
+function Process-Api($req, $resp, $path, $method) {
   $db = Load-Db
-  if (Handle-Auth      $req $resp $db $path $method) { return }
-  if (Handle-Stats     $req $resp $db $path $method) { return }
-  if (Handle-Roulette  $req $resp $db $path $method) { return }
-  if (Handle-Rewards   $req $resp $db $path $method) { return }
-  if (Handle-Economy   $req $resp $db $path $method) { return }
-  if (Handle-Cam       $req $resp $db $path $method) { return }
-  if (Handle-Tasks     $req $resp $db $path $method) { return }
-  if (Handle-Community $req $resp $db $path $method) { return }
+  if (Process-Auth      $req $resp $db $path $method) { return }
+  if (Process-Stats     $req $resp $db $path $method) { return }
+  if (Process-Roulette  $req $resp $db $path $method) { return }
+  if (Process-Rewards   $req $resp $db $path $method) { return }
+  if (Process-Economy   $req $resp $db $path $method) { return }
+  if (Process-Cam       $req $resp $db $path $method) { return }
+  if (Process-Tasks     $req $resp $db $path $method) { return }
+  if (Process-Community $req $resp $db $path $method) { return }
   # Always-on Feedback widget (POST is anonymous; admin GET/resolve gated).
-  if (Handle-Feedback  $req $resp $db $path $method) { return }
+  if (Process-Feedback  $req $resp $db $path $method) { return }
   # Communicator: presence (/api/online) + 1:1 chat (/api/chat/*).
-  if (Handle-Chat      $req $resp $db $path $method) { return }
+  if (Process-Chat      $req $resp $db $path $method) { return }
   # Public model gallery + per-model detail (verification gated).
-  if (Handle-Models    $req $resp $db $path $method) { return }
+  if (Process-Models    $req $resp $db $path $method) { return }
   # Email verification: start + confirm.
-  if (Handle-Verify    $req $resp $db $path $method) { return }
+  if (Process-Verify    $req $resp $db $path $method) { return }
   # Photo uploads: model main photo + gallery add/remove.
-  if (Handle-Uploads   $req $resp $db $path $method) { return }
-  if (Handle-Model     $req $resp $db $path $method) { return }
-  if (Handle-Admin     $req $resp $db $path $method) { return }
+  if (Process-Uploads   $req $resp $db $path $method) { return }
+  if (Process-Model     $req $resp $db $path $method) { return }
+  if (Process-Admin     $req $resp $db $path $method) { return }
   Send-Json $resp @{ error = 'Not found.' } 404
 }
 
 # ---------- Dispatcher ----------
-function Handle-Request($ctx) {
+function Process-Request($ctx) {
   $req  = $ctx.Request
   $resp = $ctx.Response
   $path = $req.Url.AbsolutePath
@@ -2965,7 +2965,7 @@ function Handle-Request($ctx) {
   try {
     if ($path -like '/api/*') {
       [Threading.Monitor]::Enter($Script:DbLock)
-      try { Handle-Api $req $resp $path $method }
+      try { Process-Api $req $resp $path $method }
       finally { [Threading.Monitor]::Exit($Script:DbLock) }
     } else {
       $rel = if ($path -eq '/' -or [string]::IsNullOrEmpty($path)) { 'index.html' } else { $path.TrimStart('/') }
@@ -3009,7 +3009,7 @@ Write-Host ""
 try {
   while ($listener.IsListening) {
     $ctx = $listener.GetContext()
-    Handle-Request $ctx
+    Process-Request $ctx
   }
 } finally {
   $listener.Stop()

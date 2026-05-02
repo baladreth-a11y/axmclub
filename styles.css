@@ -255,6 +255,26 @@
   .nav-link:hover { color: var(--text); }
   .nav-actions { display: flex; gap: var(--space-2); align-items: center; }
 
+  /* Mobile nav toggle */
+  .nav-toggle {
+    display: none; /* Hidden on desktop */
+    flex-direction: column; gap: 3px;
+    width: 24px; height: 24px;
+    background: transparent; border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    padding: 4px;
+    cursor: pointer;
+    transition: border-color var(--fast);
+  }
+  .nav-toggle:hover { border-color: var(--gold); }
+  .nav-toggle-line {
+    display: block; height: 2px; background: var(--text);
+    border-radius: 1px; transition: transform var(--fast), opacity var(--fast);
+  }
+  .nav-toggle.is-open .nav-toggle-line:nth-child(1) { transform: rotate(45deg) translate(5px, 5px); }
+  .nav-toggle.is-open .nav-toggle-line:nth-child(2) { opacity: 0; }
+  .nav-toggle.is-open .nav-toggle-line:nth-child(3) { transform: rotate(-45deg) translate(7px, -6px); }
+
   /* ---- Nav dropdown (Support & Rewards) ------------------------ */
   .nav-dropdown {
     position: relative;
@@ -1620,7 +1640,20 @@
     .grid-3,
     .tier-grid      { grid-template-columns: 1fr; }
     .roulette       { grid-template-columns: 1fr; gap: var(--space-6); }
-    .nav-links      { display: none; }
+    .nav-links      { 
+      position: absolute; top: 100%; left: 0; right: 0;
+      background: rgba(10, 12, 17, 0.95);
+      backdrop-filter: blur(14px);
+      border-bottom: 1px solid var(--line);
+      flex-direction: column; gap: var(--space-4);
+      padding: var(--space-4);
+      opacity: 0; visibility: hidden;
+      transform: translateY(-10px);
+      transition: opacity var(--fast), visibility var(--fast), transform var(--fast);
+      z-index: 39;
+    }
+    .nav-links.is-open { opacity: 1; visibility: visible; transform: translateY(0); }
+    .nav-toggle     { display: flex; }
     .section        { padding: var(--space-9) 0; }
   }
   @media (max-width: 1024px) {

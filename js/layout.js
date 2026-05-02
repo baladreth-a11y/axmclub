@@ -54,6 +54,11 @@ function navMarkup(activePage) {
         <a id="navModelLink" class="nav-link hidden" href="/model.html"${isActive('model')}>Model dashboard</a>
       </nav>
       <div class="nav-actions">
+        <button id="navToggle" class="nav-toggle" aria-label="Toggle navigation menu" hidden>
+          <span class="nav-toggle-line"></span>
+          <span class="nav-toggle-line"></span>
+          <span class="nav-toggle-line"></span>
+        </button>
         <button id="openLogin" class="btn btn-ghost">Sign in</button>
         <button id="openRegister" class="btn btn-primary">Join free</button>
         <div id="userChip" class="user-chip hidden">
@@ -320,6 +325,35 @@ const footerMarkup = `
     <p>© <span id="year"></span> AxMclub.com. All rights reserved.</p>
   </div>`;
 
+// ---- Nav toggle for mobile ------------------------------------------
+function initNavToggle() {
+  const toggle = $('#navToggle');
+  const navLinks = $('.nav-links');
+  if (!toggle || !navLinks) return;
+
+  toggle.hidden = false; // Show the button
+  toggle.addEventListener('click', () => {
+    const isOpen = navLinks.classList.toggle('is-open');
+    toggle.classList.toggle('is-open', isOpen);
+  });
+
+  // Close menu when clicking outside or on a link
+  document.addEventListener('click', (e) => {
+    if (!navLinks.contains(e.target) && !toggle.contains(e.target)) {
+      navLinks.classList.remove('is-open');
+      toggle.classList.remove('is-open');
+    }
+  });
+
+  // Close menu when a link is clicked
+  navLinks.addEventListener('click', (e) => {
+    if (e.target.classList.contains('nav-link')) {
+      navLinks.classList.remove('is-open');
+      toggle.classList.remove('is-open');
+    }
+  });
+}
+
 // ---- Public API ----------------------------------------------------
 export function initSharedLayout({ activePage = null } = {}) {
   const navHost    = $('#navHost');
@@ -330,6 +364,7 @@ export function initSharedLayout({ activePage = null } = {}) {
   if (navHost) {
     navHost.classList.add('navbar');
     navHost.innerHTML = navMarkup(activePage);
+    initNavToggle();
   }
   if (gateHost)   gateHost.outerHTML   = gateMarkup;
   if (modalHost)  modalHost.outerHTML  = modalMarkup;
