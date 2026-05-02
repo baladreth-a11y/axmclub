@@ -286,9 +286,17 @@ function New-Salt {
 }
 
 function Get-PasswordHash($password, $salt) {
-  $sha = [Security.Cryptography.SHA256]::Create()
-  $bytes = [Text.Encoding]::UTF8.GetBytes("${salt}:${password}")
-  return [Convert]::ToBase64String($sha.ComputeHash($bytes))
+  # Use PBKDF2 (Rfc2898) with SHA256 and strong iteration count
+  $iterations = 100000
+  try {
+    $saltBytes = [Convert]::FromBase64String($salt)
+  } catch {
+    # Fallback: treat $salt as raw string
+    $saltBytes = [Text.Encoding]::UTF8.GetBytes($salt)
+  }
+  $rfc = New-Object System.Security.Cryptography.Rfc2898DeriveBytes($password, $saltBytes, $iterations, [System.Security.Cryptography.HashAlgorithmName]::SHA256)
+  $hashBytes = $rfc.GetBytes(32)  # 256-bit
+  return "$iterations:$salt:" + [Convert]::ToBase64String($hashBytes)
 }
 
 function New-Token { [guid]::NewGuid().ToString('N') }
