@@ -258,10 +258,16 @@ function Get-Db {
 }
 
 function Save-Db($db) {
-  $json = $db | ConvertTo-Json -Depth 20
-  $tmp = "$DbPath.tmp"
-  [IO.File]::WriteAllText($tmp, $json, [Text.UTF8Encoding]::new($false))
-  Move-Item -Force $tmp $DbPath
+  try {
+    $json = $db | ConvertTo-Json -Depth 20
+    $tmp = "$DbPath.tmp"
+    [IO.File]::WriteAllText($tmp, $json, [Text.UTF8Encoding]::new($false))
+    Move-Item -Force $tmp $DbPath
+    return $true
+  } catch {
+    Write-Error "[Save-Db] Failed to save database: $_"
+    return $false
+  }
 }
 
 function New-Salt {
@@ -843,64 +849,83 @@ function Process-Auth($req, $resp, $db, $path, $method) {
   switch ($key) {
 
     'POST /api/register' {
-      $body = Read-JsonBody $req
-      $name = ("$($body.name)").Trim()
-      $email = ("$($body.email)").Trim().ToLower()
-      $password = "$($body.password)"
-      $accountType = ("$($body.accountType)").Trim().ToLower()
-      if (-not $accountType) { $accountType = 'supporter' }
-      if ($accountType -eq 'model') {
-        Send-Json $resp @{ error = 'Model accounts are invite-only and coming soon.' } 403
+      try {
+        $body = Read-JsonBody $req
+        if (-not $body -or $body.Count -eq 0) {
+          Write-Host "[Register] Failed to parse request body"
+          Send-Json $resp @{ error = 'Invalid request body.' } 400
+          return $true
+        }
+        $name = ("$($body.name)").Trim()
+        $email = ("$($body.email)").Trim().ToLower()
+        $password = "$($body.password)"
+        $accountType = ("$($body.accountType)").Trim().ToLower()
+        if (-not $accountType) { $accountType = 'supporter' }
+        if ($accountType -eq 'model') {
+          Send-Json $resp @{ error = 'Model accounts are invite-only and coming soon.' } 403
+          return $true
+        }
+        if ($accountType -ne 'supporter') {
+          Send-Json $resp @{ error = 'Invalid account type.' } 400
+          return $true
+        }
+        if (-not $name -or -not $email -or -not $password) {
+          Send-Json $resp @{ error = 'Name, email and password are required.' } 400
+          return $true
+        }
+        if ($password.Length -lt 4) {
+          Send-Json $resp @{ error = 'Password must be at least 4 characters.' } 400
+          return $true
+        }
+        if ($db.users.ContainsKey($email)) {
+          Send-Json $resp @{ error = 'An account with this email already exists.' } 409
+          return $true
+        }
+        $salt = New-Salt
+        $hash = Get-PasswordHash $password $salt
+        $db.users[$email] = @{
+          name          = $name
+          email         = $email
+          pwSalt        = $salt
+          pwHash        = $hash
+          points        = 0
+          tokens        = 0
+          rank          = ''
+          offers        = @()
+          lastSpin      = 0
+          joined        = NowMs
+          accountType   = $accountType
+          emailVerified = $false
+          gallery       = @()
+          gender        = ''
+          photoUrl      = ''
+          bio           = ''
+          brandColor    = ''
+          socials       = @{ telegram=''; snap=''; webcam=''; fansite='' }
+          lastSeenMs    = NowMs
+          cam2cam       = (Default-Cam2Cam $accountType)
+          dmPolicy      = (Default-DmPolicy $accountType)
+        }
+        Ensure-Slug $db $db.users[$email] | Out-Null
+        $db.stats.members = [int]$db.stats.members + 1
+        $sid = New-Token
+        $db.sessions[$sid] = $email
+        
+        # Save database with error handling
+        if (-not (Save-Db $db)) {
+          Write-Host "[Register] Database save failed for email: $email"
+          Send-Json $resp @{ error = 'Failed to create account. Please try again.' } 500
+          return $true
+        }
+        
+        Write-Host "[Register] Success: $email registered as $accountType"
+        Send-Json $resp @{ user = (Public-User $db.users[$email]) } 200 @((Session-Cookie $sid))
+        return $true
+      } catch {
+        Write-Error "[Register] Unhandled exception: $_"
+        Send-Json $resp @{ error = 'Registration failed. Please try again.' } 500
         return $true
       }
-      if ($accountType -ne 'supporter') {
-        Send-Json $resp @{ error = 'Invalid account type.' } 400
-        return $true
-      }
-      if (-not $name -or -not $email -or -not $password) {
-        Send-Json $resp @{ error = 'Name, email and password are required.' } 400
-        return $true
-      }
-      if ($password.Length -lt 4) {
-        Send-Json $resp @{ error = 'Password must be at least 4 characters.' } 400
-        return $true
-      }
-      if ($db.users.ContainsKey($email)) {
-        Send-Json $resp @{ error = 'An account with this email already exists.' } 409
-        return $true
-      }
-      $salt = New-Salt
-      $hash = Get-PasswordHash $password $salt
-      $db.users[$email] = @{
-        name          = $name
-        email         = $email
-        pwSalt        = $salt
-        pwHash        = $hash
-        points        = 0
-        tokens        = 0
-        rank          = ''
-        offers        = @()
-        lastSpin      = 0
-        joined        = NowMs
-        accountType   = $accountType
-        emailVerified = $false
-        gallery       = @()
-        gender        = ''
-        photoUrl      = ''
-        bio           = ''
-        brandColor    = ''
-        socials       = @{ telegram=''; snap=''; webcam=''; fansite='' }
-        lastSeenMs    = NowMs
-        cam2cam       = (Default-Cam2Cam $accountType)
-        dmPolicy      = (Default-DmPolicy $accountType)
-      }
-      Ensure-Slug $db $db.users[$email] | Out-Null
-      $db.stats.members = [int]$db.stats.members + 1
-      $sid = New-Token
-      $db.sessions[$sid] = $email
-      Save-Db $db
-      Send-Json $resp @{ user = (Public-User $db.users[$email]) } 200 @((Session-Cookie $sid))
-      return $true
     }
 
     'POST /api/login' {
