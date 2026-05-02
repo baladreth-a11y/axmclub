@@ -228,7 +228,7 @@ function ConvertTo-Hashtable {
   return $obj
 }
 
-function Load-Db {
+function Get-Db {
   if (-not (Test-Path $DbPath)) {
     return @{
       users    = @{}
@@ -1783,9 +1783,9 @@ function Process-Model($req, $resp, $db, $path, $method) {
       $myName = ($u.name + '').ToLower()
       $all = @()
       foreach ($email in $db.users.Keys) {
-        $sender = $db.users[$email]
-        if (-not $sender.offers) { continue }
-        foreach ($o in @($sender.offers)) {
+        $sourceUser = $db.users[$email]
+        if (-not $sourceUser.offers) { continue }
+        foreach ($o in @($sourceUser.offers)) {
           $tgt = ''
           if ($o.target) { $tgt = [string]$o.target }
           if ($tgt.ToLower() -ne $myName) { continue }
@@ -1793,8 +1793,8 @@ function Process-Model($req, $resp, $db, $path, $method) {
           if ($o.status) { $status = [string]$o.status }
           $all += @{
             id       = [string]$o.id
-            from     = [string]$sender.email
-            fromName = [string]$sender.name
+            from     = [string]$sourceUser.email
+            fromName = [string]$sourceUser.name
             target   = $tgt
             message  = [string]$o.message
             status   = $status
@@ -1822,14 +1822,14 @@ function Process-Model($req, $resp, $db, $path, $method) {
         Send-Json $resp @{ error = 'Offer not found.' } 404
         return $true
       }
-      $sender = $db.users[$email]
-      if (-not $sender.offers) {
+      $sourceUser = $db.users[$email]
+      if (-not $sourceUser.offers) {
         Send-Json $resp @{ error = 'Offer not found.' } 404
         return $true
       }
       $myName = ($u.name + '').ToLower()
       $found = $false
-      foreach ($o in @($sender.offers)) {
+      foreach ($o in @($sourceUser.offers)) {
         if ($o.id -ne $offerId) { continue }
         $tgt = ''
         if ($o.target) { $tgt = [string]$o.target }
@@ -1869,9 +1869,9 @@ function Process-Model($req, $resp, $db, $path, $method) {
       $myName = ($u.name + '').ToLower()
       $offersTotal = 0; $offersPending = 0; $offersAccepted = 0; $offersDeclined = 0
       foreach ($email in $db.users.Keys) {
-        $sender = $db.users[$email]
-        if (-not $sender.offers) { continue }
-        foreach ($o in @($sender.offers)) {
+        $sourceUser = $db.users[$email]
+        if (-not $sourceUser.offers) { continue }
+        foreach ($o in @($sourceUser.offers)) {
           $tgt = ''
           if ($o.target) { $tgt = [string]$o.target }
           if ($tgt.ToLower() -ne $myName) { continue }
