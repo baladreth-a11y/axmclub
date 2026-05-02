@@ -156,6 +156,7 @@ $Root    = Split-Path -Parent $MyInvocation.MyCommand.Path
 $DataDir = Join-Path $Root 'data'
 $DbPath  = Join-Path $DataDir 'db.json'
 $UploadsDir = Join-Path $Root 'uploads'
+$LogPath = Join-Path $Root 'server.log'
 if (-not (Test-Path $DataDir))    { New-Item -ItemType Directory $DataDir    | Out-Null }
 if (-not (Test-Path $UploadsDir)) { New-Item -ItemType Directory $UploadsDir | Out-Null }
 
@@ -163,6 +164,14 @@ $Script:DbLock = New-Object object
 # Make $Port reachable from helpers like Send-VerifyEmail without
 # requiring it to be passed around. Set after the param block runs.
 $Script:Port = $Port
+
+function Write-ServerLog([string]$msg) {
+  try {
+    $line = ('[' + (Get-Date -Format 'o') + '] ' + $msg)
+    Add-Content -Path $Script:LogPath -Value $line
+  } catch {}
+}
+Write-ServerLog("[boot] server starting on port $Port")
 # Upload limits / allowed mime types are referenced by the upload handler.
 $Script:UploadMaxBytes = 10485760  # 10 MB
 $Script:UploadMimeTypes = @{
@@ -2132,6 +2141,22 @@ function Process-Admin($req, $resp, $db, $path, $method) {
       return $true
     }
 
+    'GET /api/admin/db' {
+      if (-not (Require-Admin $req $resp)) { return $true }
+      Send-Json $resp @{ db = $db }
+      return $true
+    }
+
+    'GET /api/admin/logs' {
+      if (-not (Require-Admin $req $resp)) { return $true }
+      $lines = @()
+      if (Test-Path $Script:LogPath) {
+        try { $lines = Get-Content -Path $Script:LogPath -Tail 200 -ErrorAction SilentlyContinue } catch {}
+      }
+      Send-Json $resp @{ logs = @($lines); count = @($lines).Count }
+      return $true
+    }
+
     'POST /api/admin/users/verify' {
       if (-not (Require-Admin $req $resp)) { return $true }
       $body = Read-JsonBody $req
@@ -2910,6 +2935,62 @@ function Process-Chat($req, $resp, $db, $path, $method) {
       return $true
     }
 
+    'GET /api/chat/public/messages' {
+      $u = Require-Auth $req $resp $db
+      if (-not $u) { return $true }
+      $sinceArg = 0
+      if ($req.Url.Query) {
+        $q = [System.Web.HttpUtility]::ParseQueryString($req.Url.Query)
+        if ($q['since']) { $sinceArg = [long]$q['since'] }
+      }
+      if (-not $db.publicChat) { $db.publicChat = @() }
+      $out = @()
+      foreach ($m in @($db.publicChat)) {
+        if ([long]$m.at -le [long]$sinceArg) { continue }
+        $out += @{
+          id   = [string]$m.id
+          from = [string]$m.from
+          name = [string]$m.name
+          text = [string]$m.text
+          at   = [long]$m.at
+        }
+      }
+      Send-Json $resp @{ messages = @($out); count = @($out).Count }
+      return $true
+    }
+
+    'POST /api/chat/public/send' {
+      $u = Require-Auth $req $resp $db
+      if (-not $u) { return $true }
+      $body = Read-JsonBody $req
+      $text = ("$($body.text)").Trim()
+      if (-not $text) {
+        Send-Json $resp @{ error = 'Message text is required.' } 400
+        return $true
+      }
+      if ($text.Length -gt [int]$Script:ChatMessageMax) {
+        Send-Json $resp @{ error = ("Message must be at most " + $Script:ChatMessageMax + " characters.") } 400
+        return $true
+      }
+      if (-not $db.publicChat) { $db.publicChat = @() }
+      $now = NowMs
+      $msg = @{
+        id   = (New-Token)
+        from = [string]$u.email
+        name = if ($u.name) { [string]$u.name } else { [string]$u.email }
+        text = $text
+        at   = $now
+      }
+      $db.publicChat = @($db.publicChat) + $msg
+      if ($db.publicChat.Count -gt 200) {
+        $start = $db.publicChat.Count - 200
+        $db.publicChat = @($db.publicChat[$start..($db.publicChat.Count - 1)])
+      }
+      Save-Db $db
+      Send-Json $resp @{ ok = $true; message = $msg }
+      return $true
+    }
+
     'POST /api/chat/policy' {
       $u = Require-Auth $req $resp $db
       if (-not $u) { return $true }
@@ -3005,6 +3086,7 @@ function Process-Request($ctx) {
     }
   } catch {
     Write-Host "ERROR handling $method $path :: $_" -ForegroundColor Red
+    Write-ServerLog("ERROR handling $method $path :: $_")
     try { Send-Json $resp @{ error = $_.ToString() } 500 } catch {}
   }
 }

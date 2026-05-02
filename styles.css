@@ -2378,6 +2378,31 @@
   .feedback-pill.other { background: var(--accent-soft);    color: var(--accent); }
 }
 
+/* DB and Logs viewers on the admin panel. */
+@layer components {
+  .admin-db-viewer,
+  .admin-logs-viewer {
+    font-family: 'JetBrains Mono', 'Fira Code', 'Source Code Pro', monospace;
+    font-size: 12px;
+    line-height: 1.4;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    background: var(--surface-1);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    padding: var(--space-4);
+    max-height: 600px;
+    overflow-y: auto;
+    color: var(--text);
+  }
+  .admin-db-viewer {
+    /* JSON formatting */
+  }
+  .admin-logs-viewer {
+    /* Log lines */
+  }
+}
+
 /* ---- Cam room: three-column cam2cam layout ----------------------------- */
 @layer components {
   .cam-room-grid {

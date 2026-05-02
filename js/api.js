@@ -105,5 +105,7 @@ export const api = {
   chatMessages:  (peer, since = 0) =>
     request('/api/chat/messages?peer=' + encodeURIComponent(peer) + '&since=' + (since | 0)),
   chatSend:      (peer, text) => request('/api/chat/send', { method: 'POST', body: { peer, text } }),
+  chatPublicMessages: since => request('/api/chat/public/messages?since=' + (since | 0)),
+  chatPublicSend:     text => request('/api/chat/public/send', { method: 'POST', body: { text } }),
   chatPolicy:    policy => request('/api/chat/policy', { method: 'POST', body: { policy } })
 };

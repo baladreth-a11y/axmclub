@@ -13,12 +13,15 @@ const POLL_MESSAGES_MS = 3000;
 const POLL_ONLINE_MS   = 5000;
 
 let panelOpen     = false;
-let activeTab     = 'online';   // 'online' | 'threads'
+let activeTab     = 'online';   // 'online' | 'threads' | 'room'
 let openWith      = '';         // peer email currently shown in the chat view
 let lastSince     = 0;          // last message timestamp we've fetched
+let roomSince     = 0;          // last public room message timestamp fetched
 let messagesCache = [];
+let roomMessagesCache = [];
 let threadsTimer  = null;
 let messagesTimer = null;
+let roomTimer     = null;
 let onlineTimer   = null;
 let peerCam2cam   = false;
 let myCam2cam     = false;
@@ -40,10 +43,26 @@ const FAB_HTML = `
         <span>Threads</span>
         <span id="commTabUnread" class="comm-tab-badge hidden">0</span>
       </button>
+      <button class="comm-tab" data-tab="room" role="tab" aria-selected="false">Room</button>
     </div>
     <div class="comm-list-wrap">
       <ul id="commOnlineList" class="comm-list comm-list--online"></ul>
       <ul id="commThreadList" class="comm-list comm-list--threads hidden"></ul>
+      <div id="commRoomView" class="comm-room hidden" aria-live="polite">
+        <div class="comm-chat-head">
+          <div></div>
+          <div class="comm-chat-ident">
+            <strong>Public room</strong>
+            <span class="comm-peer-status"><span class="online-dot" data-online="true"></span> Everyone</span>
+          </div>
+          <div></div>
+        </div>
+        <div id="commRoomMessages" class="comm-messages"></div>
+        <form id="commRoomComposeForm" class="comm-compose">
+          <textarea id="commRoomComposeText" rows="2" maxlength="2000" placeholder="Say something to the room…"></textarea>
+          <button type="submit" class="btn btn-primary comm-send">Send</button>
+        </form>
+      </div>
     </div>
     <div id="commChatView" class="comm-chat hidden" aria-live="polite">
       <div class="comm-chat-head">
@@ -156,6 +175,24 @@ function renderMessages() {
   wrap.scrollTop = wrap.scrollHeight;
 }
 
+function renderRoomMessages() {
+  const wrap = $('#commRoomMessages');
+  if (!wrap) return;
+  if (!roomMessagesCache.length) {
+    wrap.innerHTML = '<div class="comm-empty">No messages yet. Be the first to say hi.</div>';
+    return;
+  }
+  wrap.innerHTML = roomMessagesCache.map(m => {
+    const mine = (m.from || '').toLowerCase() === ((store.get().user || {}).email || '').toLowerCase();
+    return `
+      <div class="comm-msg ${mine ? 'is-mine' : 'is-peer'}">
+        <div class="comm-msg-bubble"><strong>${escapeHtml(m.name)}:</strong> ${escapeHtml(m.text)}</div>
+        <div class="comm-msg-time muted">${escapeHtml(formatTime(m.at))}</div>
+      </div>`;
+  }).join('');
+  wrap.scrollTop = wrap.scrollHeight;
+}
+
 function renderPeerHeader(name, online, peerCam) {
   const nameEl = $('#commPeerName');
   if (nameEl) nameEl.textContent = name || '\u2014';
@@ -188,13 +225,19 @@ function backToList() {
   openWith = '';
   $('#commChatView').classList.add('hidden');
   document.querySelectorAll('.comm-tab').forEach(t => t.classList.remove('is-disabled'));
+  $('#commOnlineList').classList.add('hidden');
+  $('#commThreadList').classList.add('hidden');
+  $('#commRoomView').classList.add('hidden');
   if (activeTab === 'online') {
     $('#commOnlineList').classList.remove('hidden');
-  } else {
+  } else if (activeTab === 'threads') {
     $('#commThreadList').classList.remove('hidden');
+  } else if (activeTab === 'room') {
+    $('#commRoomView').classList.remove('hidden');
   }
   store.set(s => ({ ...s, chat: { ...s.chat, openWith: '', messages: [] } }));
   stopMessagesTimer();
+  stopRoomTimer();
   // Pull fresh thread state so unread badges update.
   fetchThreads();
 }
@@ -209,8 +252,10 @@ function setActiveTab(tab) {
   if (openWith) return;
   $('#commOnlineList').classList.toggle('hidden', tab !== 'online');
   $('#commThreadList').classList.toggle('hidden', tab !== 'threads');
+  $('#commRoomView').classList.toggle('hidden', tab !== 'room');
   if (tab === 'online') fetchOnline();
   if (tab === 'threads') fetchThreads();
+  if (tab === 'room') fetchRoomMessages(true);
 }
 
 async function fetchOnline() {
@@ -266,6 +311,26 @@ async function fetchMessages(initial) {
   }
 }
 
+async function fetchRoomMessages(initial) {
+  try {
+    const res = await api.chatPublicMessages(roomSince || 0);
+    const incoming = res.messages || [];
+    if (incoming.length) {
+      const byId = new Map(roomMessagesCache.map(m => [m.id, m]));
+      for (const m of incoming) byId.set(m.id, m);
+      roomMessagesCache = Array.from(byId.values()).sort((a, b) => a.at - b.at);
+      roomSince = roomMessagesCache[roomMessagesCache.length - 1].at;
+      renderRoomMessages();
+    } else if (initial) {
+      renderRoomMessages();
+    }
+  } catch (err) {
+    if (err.status === 401) {
+      $('#commRoomMessages').innerHTML = '<div class="comm-empty">Sign in to join the room.</div>';
+    }
+  }
+}
+
 async function onSend(e) {
   e.preventDefault();
   if (!openWith) return;
@@ -308,22 +373,34 @@ function startMessagesTimer() {
   messagesTimer = setInterval(() => fetchMessages(false), POLL_MESSAGES_MS);
 }
 function stopMessagesTimer() { if (messagesTimer) { clearInterval(messagesTimer); messagesTimer = null; } }
+function startRoomTimer() {
+  stopRoomTimer();
+  roomTimer = setInterval(() => { if (panelOpen && activeTab === 'room' && !openWith) fetchRoomMessages(false); }, POLL_MESSAGES_MS);
+}
+function stopRoomTimer() { if (roomTimer) { clearInterval(roomTimer); roomTimer = null; } }
 function startOnlineTimer() {
   stopOnlineTimer();
   onlineTimer = setInterval(() => { if (panelOpen && activeTab === 'online' && !openWith) fetchOnline(); }, POLL_ONLINE_MS);
 }
 function stopOnlineTimer() { if (onlineTimer) { clearInterval(onlineTimer); onlineTimer = null; } }
+function startRoomTimer() {
+  stopRoomTimer();
+  roomTimer = setInterval(() => { if (panelOpen && activeTab === 'room') fetchRoomMessages(false); }, POLL_MESSAGES_MS);
+}
+function stopRoomTimer() { if (roomTimer) { clearInterval(roomTimer); roomTimer = null; } }
 
 function refreshForUser(user) {
   if (!user) {
     // Anonymous: hide signed-in views, show prompt.
     $('#commOnlineList').classList.add('hidden');
     $('#commThreadList').classList.add('hidden');
+    $('#commRoomView').classList.add('hidden');
     $('#commChatView').classList.add('hidden');
     $('#commSignedOut').classList.remove('hidden');
     renderUnreadBadge(0);
     stopThreadsTimer();
     stopMessagesTimer();
+    stopRoomTimer();
     stopOnlineTimer();
     return;
   }
@@ -335,6 +412,10 @@ function refreshForUser(user) {
   }
   startThreadsTimer();
   startOnlineTimer();
+  if (activeTab === 'room') {
+    fetchRoomMessages(true);
+    startRoomTimer();
+  }
   fetchThreads();
   if (activeTab === 'online' && !openWith) fetchOnline();
   myCam2cam = !!user.cam2cam;
@@ -401,6 +482,24 @@ export function initCommunicator() {
 
   $('#commComposeForm').addEventListener('submit', onSend);
   $('#commComposeText').addEventListener('keydown', onComposeKey);
+  $('#commRoomComposeForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const ta = $('#commRoomComposeText');
+    if (!ta) return;
+    const text = (ta.value || '').trim();
+    if (!text) return;
+    ta.disabled = true;
+    try {
+      await api.chatPublicSend(text);
+      ta.value = '';
+      fetchRoomMessages(true);
+    } catch (err) {
+      toast(err.message || 'Could not send room message.', 'error');
+    } finally {
+      ta.disabled = false;
+      ta.focus();
+    }
+  });
 
   $('#commCam2cam').addEventListener('click', async () => {
     if (!openWith) return;

@@ -64,6 +64,8 @@ function setUnlocked(on) {
   $('#passwordsSection').classList.toggle('hidden', !on);
   $('#offersSection').classList.toggle('hidden', !on);
   const fb = $('#feedbackSection'); if (fb) fb.classList.toggle('hidden', !on);
+  $('#dbSection').classList.toggle('hidden', !on);
+  $('#logsSection').classList.toggle('hidden', !on);
   $('#authNotice').classList.toggle('hidden', on);
 }
 
@@ -308,6 +310,41 @@ async function setFeedbackStatus(id, status) {
   }
 }
 
+/* ---------- DB Viewer ------------------------------------------- */
+async function loadDb() {
+  const viewer = $('#dbViewer');
+  const countEl = $('#dbCount');
+  viewer.textContent = 'Loading…';
+  countEl.textContent = '—';
+  try {
+    const data = await adminFetch('/api/admin/db');
+    const jsonStr = JSON.stringify(data, null, 2);
+    viewer.textContent = jsonStr;
+    countEl.textContent = `${Object.keys(data).length} keys`;
+  } catch (err) {
+    viewer.textContent = `Error: ${err.message}`;
+    countEl.textContent = '—';
+  }
+}
+
+/* ---------- Logs Viewer ----------------------------------------- */
+async function loadLogs() {
+  const viewer = $('#logsViewer');
+  const countEl = $('#logsCount');
+  viewer.textContent = 'Loading…';
+  countEl.textContent = '—';
+  try {
+    const data = await adminFetch('/api/admin/logs');
+    const logsStr = Array.isArray(data.logs) ? data.logs.join('\n') : 'No logs available';
+    viewer.textContent = logsStr;
+    const lines = logsStr.split('\n').length;
+    countEl.textContent = `${lines} line${lines === 1 ? '' : 's'}`;
+  } catch (err) {
+    viewer.textContent = `Error: ${err.message}`;
+    countEl.textContent = '—';
+  }
+}
+
 /* ---- Users ----------------------------------------------------- */
 // Local cache + edit-modal state. The list endpoint returns a snapshot;
 // every adjust/delete just re-fetches.
@@ -466,6 +503,8 @@ function applyKey(next) {
     loadPasswords();
     loadOffers();
     loadFeedback();
+    loadDb();
+    loadLogs();
   }
 }
 
@@ -477,6 +516,8 @@ if (adminKey) {
   loadPasswords();
   loadOffers();
   loadFeedback();
+  loadDb();
+  loadLogs();
 }
 
 $('#saveKeyBtn').addEventListener('click', () => applyKey($('#adminKeyInput').value));
@@ -544,3 +585,7 @@ document.addEventListener('keydown', e => {
     closeUserEdit();
   }
 });
+
+// DB and Logs refresh buttons
+$('#dbRefreshBtn')?.addEventListener('click', loadDb);
+$('#logsRefreshBtn')?.addEventListener('click', loadLogs);

@@ -305,6 +305,26 @@
         </tbody>
       </table>
     </section>
+
+    <!-- DB Viewer -->
+    <section id="dbSection" class="admin-card hidden">
+      <h2>Database viewer</h2>
+      <div class="admin-toolbar">
+        <button id="dbRefreshBtn" class="btn btn-outline">Refresh</button>
+        <span id="dbCount" class="admin-toolbar-count">—</span>
+      </div>
+      <pre id="dbViewer" class="admin-db-viewer"></pre>
+    </section>
+
+    <!-- Logs Viewer -->
+    <section id="logsSection" class="admin-card hidden">
+      <h2>Server logs</h2>
+      <div class="admin-toolbar">
+        <button id="logsRefreshBtn" class="btn btn-outline">Refresh</button>
+        <span id="logsCount" class="admin-toolbar-count">—</span>
+      </div>
+      <pre id="logsViewer" class="admin-logs-viewer"></pre>
+    </section>
   </div>
 
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
