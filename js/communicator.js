@@ -383,11 +383,6 @@ function startOnlineTimer() {
   onlineTimer = setInterval(() => { if (panelOpen && activeTab === 'online' && !openWith) fetchOnline(); }, POLL_ONLINE_MS);
 }
 function stopOnlineTimer() { if (onlineTimer) { clearInterval(onlineTimer); onlineTimer = null; } }
-function startRoomTimer() {
-  stopRoomTimer();
-  roomTimer = setInterval(() => { if (panelOpen && activeTab === 'room') fetchRoomMessages(false); }, POLL_MESSAGES_MS);
-}
-function stopRoomTimer() { if (roomTimer) { clearInterval(roomTimer); roomTimer = null; } }
 
 function refreshForUser(user) {
   if (!user) {

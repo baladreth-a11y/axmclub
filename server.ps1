@@ -652,9 +652,29 @@ function Send-Static($resp, $fullPath) {
     '.ico'  { 'image/x-icon' }
     default { 'application/octet-stream' }
   }
+
+  # Set caching headers for performance optimization
+  $cacheControl = switch ($ext) {
+    '.html' { 'public, max-age=0, must-revalidate' }  # No cache for HTML
+    '.css' { 'public, max-age=31536000, immutable' }  # 1 year for CSS
+    '.js' { 'public, max-age=31536000, immutable' }   # 1 year for JS
+    '.woff' { 'public, max-age=31536000, immutable' } # 1 year for fonts
+    '.woff2' { 'public, max-age=31536000, immutable' }
+    '.svg' { 'public, max-age=604800' }               # 1 week for SVG
+    '.png' { 'public, max-age=604800' }               # 1 week for images
+    '.jpg' { 'public, max-age=604800' }
+    '.jpeg' { 'public, max-age=604800' }
+    '.webp' { 'public, max-age=604800' }
+    '.gif' { 'public, max-age=604800' }
+    '.ico' { 'public, max-age=604800' }
+    default { 'public, max-age=3600' }                # 1 hour default
+  }
+
   $bytes = [IO.File]::ReadAllBytes($fullPath)
   $resp.ContentType = $mime
   $resp.ContentLength64 = $bytes.Length
+  $resp.Headers.Add('Cache-Control', $cacheControl)
+  $resp.Headers.Add('X-Content-Type-Options', 'nosniff')
   $resp.OutputStream.Write($bytes, 0, $bytes.Length)
   $resp.OutputStream.Close()
 }
@@ -919,14 +939,14 @@ function Process-Auth($req, $resp, $db, $path, $method) {
         $db.stats.members = [int]$db.stats.members + 1
         $sid = New-Token
         $db.sessions[$sid] = $email
-        
+
         # Save database with error handling
         if (-not (Save-Db $db)) {
           Write-Host "[Register] Database save failed for email: $email"
           Send-Json $resp @{ error = 'Failed to create account. Please try again.' } 500
           return $true
         }
-        
+
         Write-Host "[Register] Success: $email registered as $accountType"
         Send-Json $resp @{ user = (Public-User $db.users[$email]) } 200 @((Session-Cookie $sid))
         return $true
@@ -3029,7 +3049,7 @@ function Process-Community($req, $resp, $db, $path, $method) {
 
 # ---- Top-level dispatcher ----------------------------------------------
 function Process-Api($req, $resp, $path, $method) {
-  $db = Load-Db
+  $db = Get-Db
   if (Process-Auth      $req $resp $db $path $method) { return }
   if (Process-Stats     $req $resp $db $path $method) { return }
   if (Process-Roulette  $req $resp $db $path $method) { return }

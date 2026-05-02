@@ -157,6 +157,17 @@
       if (user) initModelDashboard(user);
     });
   </script>
-  <script defer src="https://crxcra.com/cams-widget-ext/im_jerky?lang=en&mode=prerecorded&outlinkUrl=https://t.crdtg2.com/409509/7234?bo=2753%2C2754%2C2755%2C2756&aff_sub5=SF_006OG000004lmDN&aff_sub4=AT_0018"></script>
+  <script>
+    (function(){
+      var url = "https://crxcra.com/cams-widget-ext/im_jerky?lang=en&mode=prerecorded&outlinkUrl=https://t.crdtg2.com/409509/7234?bo=2753%2C2754%2C2755%2C2756&aff_sub5=SF_006OG000004lmDN&aff_sub4=AT_0018";
+      var s = document.createElement('script');
+      s.defer = true;
+      s.src = url;
+      var timer = setTimeout(function(){ if(s.parentNode) s.parentNode.removeChild(s); console.warn('Third-party script timed out and was removed:', url); }, 3000);
+      s.onload = function(){ clearTimeout(timer); };
+      s.onerror = function(){ clearTimeout(timer); console.warn('Third-party script failed to load:', url); };
+      document.head.appendChild(s);
+    })();
+  </script>
 </body>
 </html>

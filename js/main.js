@@ -23,16 +23,46 @@ import { initOnboarding } from './onboarding.js';
 // gets a user-visible toast instead of silently failing, and is
 // logged to the console with an [axm] prefix for easier triage.
 function safeToast(msg) {
-  try { toast(msg, 'error'); } catch { /* toast DOM not ready */ }
+  try {
+    toast(msg, 'error');
+  } catch {
+    /* toast DOM not ready */
+  }
 }
-window.addEventListener('error', ev => {
+function safeAlert(msg) {
+  // Fallback visual error if toast system fails
+  console.error('[axm]', msg);
+  try {
+    const banner = document.createElement('div');
+    banner.style.cssText =
+      'position:fixed;top:0;left:0;right:0;background:red;color:white;padding:16px;z-index:99999;font-size:14px;';
+    banner.textContent = '[ERROR] ' + msg;
+    document.body.appendChild(banner);
+  } catch {}
+}
+window.addEventListener('error', (ev) => {
   console.error('[axm] runtime error:', ev.error || ev.message);
+  console.error('[axm] stack:', ev.error?.stack || '(no stack)');
   safeToast('Something went wrong. Please refresh the page.');
 });
-window.addEventListener('unhandledrejection', ev => {
+window.addEventListener('unhandledrejection', (ev) => {
   console.error('[axm] unhandled promise:', ev.reason);
+  if (ev.reason?.stack) console.error('[axm] stack:', ev.reason.stack);
   safeToast('A request failed. Please try again.');
 });
+// Also catch module loading errors
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => {
+    if (!window.axmBootstrapped) {
+      console.warn('[axm] bootstrap did not complete after DOMContentLoaded');
+    }
+  });
+  setTimeout(() => {
+    if (!window.axmBootstrapped) {
+      safeAlert('Site modules failed to load. Check browser console.');
+    }
+  }, 5000);
+}
 
 async function bootstrap() {
   $('#year').textContent = new Date().getFullYear();
@@ -57,12 +87,17 @@ async function bootstrap() {
   const [meRes, statsRes] = await Promise.allSettled([api.me(), api.stats()]);
   store.set({
     user: meRes.status === 'fulfilled' ? meRes.value.user : null,
-    stats: statsRes.status === 'fulfilled' ? statsRes.value : { members: 0, spins: 0 }
+    stats: statsRes.status === 'fulfilled' ? statsRes.value : { members: 0, spins: 0 },
   });
   await Promise.allSettled([refreshLeaderboard(), refreshRewards(), refreshTasks()]);
+
+  // Mark successful bootstrap
+  window.axmBootstrapped = true;
+  console.log('[axm] bootstrap complete');
 }
 
-bootstrap().catch(err => {
+bootstrap().catch((err) => {
   console.error('[axm] bootstrap failed:', err);
-  safeToast('The club failed to load. Please refresh.');
+  console.error('[axm] stack:', err.stack);
+  safeAlert('Site failed to initialize. Check console for details.');
 });
