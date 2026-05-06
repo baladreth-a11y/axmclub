@@ -1,173 +1,161 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Model dashboard — AxMclub.com</title>
-  <meta name="robots" content="noindex,nofollow" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css" />
-</head>
-<body>
-  <header id="navHost"></header>
-  <div id="gateHost"></div>
+import { $ } from './util.js';
+import { api } from './api.js';
+import { store } from './store.js';
+import { toast } from './ui.js';
+import { openModal } from './modal.js';
 
-  <main class="section dash-section">
-    <div class="container">
-      <header class="dash-head">
-        <span class="eyebrow">Model dashboard</span>
-        <h1 id="dashHello">Welcome.</h1>
-        <p class="muted">
-          <span id="dashEmail">—</span> · joined <span id="dashJoined">—</span>
-        </p>
-      </header>
+const SEGMENT_COLORS = [
+  '#1a1f2d', '#232838', '#d4af6a', '#1a1f2d',
+  '#7c6cff', '#232838', '#d4af6a', '#1a1f2d'
+];
+const SEGMENT_LABELS = [
+  '10 pts', '50 pts', '100 pts', '25 pts',
+  '500 pts', '20 pts', '75 pts', '5 pts'
+];
+const COOLDOWN_MS = 24 * 60 * 60 * 1000;
+const SPIN_DURATION_MS = 4500;
 
-      <div class="dash-grid">
+let canvas, ctx;
+let rotation = 0;
+let spinning = false;
 
-        <!-- Profile editor -->
-        <section class="dash-card dash-card-wide" id="profileCard">
-          <h2>Public profile</h2>
-          <p class="muted">What members see on the Players page and when they message you.</p>
-          <form id="profileForm" class="form dash-form">
-            <label>Display name
-              <input name="name" type="text" required minlength="1" maxlength="60" />
-            </label>
-            <label>Gender
-              <select name="gender">
-                <option value="">— (none)</option>
-                <option value="female">Female</option>
-                <option value="male">Male</option>
-                <option value="crossdresser">Crossdresser</option>
-                <option value="transsexual">Transsexual</option>
-              </select>
-            </label>
-            <label>Bio <small class="muted">(max 280 chars)</small>
-              <textarea name="bio" rows="3" maxlength="280" placeholder="A short tagline. Vibe, hours, anything you want pinned."></textarea>
-            </label>
-            <label>Brand color
-              <span class="brand-pick">
-                <input name="brandColor" type="color" />
-                <span id="brandSwatch" class="brand-swatch" aria-hidden="true"></span>
-              </span>
-            </label>
-            <fieldset class="dash-socials">
-              <legend>Social links</legend>
-              <label>Telegram <input name="social_telegram" type="text" maxlength="200" placeholder="https://t.me/..." /></label>
-              <label>Snap     <input name="social_snap"     type="text" maxlength="200" placeholder="https://snapchat.com/add/..." /></label>
-              <label>Webcam   <input name="social_webcam"   type="text" maxlength="200" placeholder="https://stripchat.com/..." /></label>
-              <label>Fansite  <input name="social_fansite"  type="text" maxlength="200" placeholder="https://onlyfans.com/..." /></label>
-            </fieldset>
-            <button class="btn btn-primary" type="submit">Save profile</button>
-          </form>
-        </section>
+function drawWheel(deg = 0) {
+  const size = canvas.width;
+  const cx = size / 2, cy = size / 2, r = size / 2 - 4;
+  ctx.clearRect(0, 0, size, size);
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate((deg * Math.PI) / 180);
 
-        <!-- Photo + gallery -->
-        <section class="dash-card dash-card-wide" id="photoCard">
-          <h2>Photos</h2>
-          <p class="muted">Your main photo shows on the gallery card. Up to 12 gallery photos, 10 MB each (JPG, PNG, WebP, GIF).</p>
-          <div class="photo-main-row">
-            <div class="photo-main-preview">
-              <img id="mainPhotoPreview" alt="Main photo preview" />
-              <span id="mainPhotoFallback" class="photo-main-fallback">No photo yet</span>
-            </div>
-            <form id="mainPhotoForm" class="photo-main-form">
-              <label>Main photo
-                <input id="mainPhotoInput" name="photo" type="file" accept="image/jpeg,image/png,image/webp,image/gif" required />
-              </label>
-              <button class="btn btn-primary" type="submit">Upload main photo</button>
-            </form>
-          </div>
-          <hr class="dash-divider" />
-          <h3 class="photo-gallery-title">Gallery <small class="muted" id="galleryCountLabel">(0/12)</small></h3>
-          <form id="galleryAddForm" class="photo-gallery-form">
-            <input id="galleryAddInput" name="photo" type="file" accept="image/jpeg,image/png,image/webp,image/gif" required />
-            <button class="btn btn-primary" type="submit">Add to gallery</button>
-          </form>
-          <div id="galleryGrid" class="gallery-grid">
-            <p class="dash-empty">No gallery photos yet.</p>
-          </div>
-        </section>
+  const n = SEGMENT_LABELS.length;
+  const seg = (2 * Math.PI) / n;
+  for (let i = 0; i < n; i++) {
+    const a0 = i * seg - Math.PI / 2;
+    const a1 = a0 + seg;
+    const color = SEGMENT_COLORS[i];
 
-        <!-- Stats -->
-        <section class="dash-card" id="statsCard">
-          <h2>At a glance</h2>
-          <dl class="dash-stats-grid">
-            <div><dt>Passwords issued</dt><dd id="statPwIssued">—</dd></div>
-            <div><dt>Active codes</dt><dd id="statPwActive">—</dd></div>
-            <div><dt>Total redemptions</dt><dd id="statRedemptions">—</dd></div>
-            <div><dt>Offers received</dt><dd id="statOffersTotal">—</dd></div>
-            <div><dt>Open offers</dt><dd id="statOffersOpen">—</dd></div>
-            <div><dt>Accepted</dt><dd id="statOffersWon">—</dd></div>
-          </dl>
-        </section>
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.arc(0, 0, r, a0, a1);
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
 
-        <!-- Passwords -->
-        <section class="dash-card dash-card-wide" id="passwordsCard">
-          <h2>Cam-room codes</h2>
-          <p class="muted">Hand a code to a member, they redeem it for a 10-minute pass.</p>
-          <form id="newPasswordForm" class="dash-inline-form">
-            <input name="password" placeholder="CODE (e.g. NOVA-NIGHT)" required minlength="2" maxlength="32" />
-            <input name="uses"     type="number" min="1" max="999" value="5" />
-            <input name="note"     placeholder="Note (optional)" maxlength="80" />
-            <button class="btn btn-primary" type="submit">Issue code</button>
-          </form>
-          <table class="dash-table">
-            <thead>
-              <tr><th>Code</th><th>Uses</th><th>Redeemed</th><th>Note</th><th></th></tr>
-            </thead>
-            <tbody id="pwBody">
-              <tr><td colspan="5" class="dash-empty">Loading…</td></tr>
-            </tbody>
-          </table>
-        </section>
+    ctx.save();
+    ctx.rotate(a0 + seg / 2);
+    ctx.textAlign = 'right';
+    ctx.fillStyle = color === '#d4af6a' ? '#1a1408' : '#e8ecf3';
+    ctx.font = '600 15px Inter, sans-serif';
+    ctx.fillText(SEGMENT_LABELS[i], r - 18, 6);
+    ctx.restore();
+  }
 
-        <!-- Offers -->
-        <section class="dash-card dash-card-wide" id="offersCard">
-          <h2>Offers addressed to you</h2>
-          <p class="muted">Members can target you by name in the "Make an offer" form.</p>
-          <table class="dash-table">
-            <thead>
-              <tr><th>When</th><th>From</th><th>Message</th><th>Status</th><th></th></tr>
-            </thead>
-            <tbody id="offersBody">
-              <tr><td colspan="5" class="dash-empty">Loading…</td></tr>
-            </tbody>
-          </table>
-        </section>
+  ctx.beginPath();
+  ctx.arc(0, 0, r, 0, Math.PI * 2);
+  ctx.strokeStyle = '#d4af6a';
+  ctx.lineWidth = 3;
+  ctx.stroke();
+  ctx.restore();
+}
 
-      </div>
-    </div>
-  </main>
+const easeOutCubic = t => 1 - Math.pow(1 - t, 3);
 
-  <div id="modalHost"></div>
-  <footer id="footerHost"></footer>
-  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+function remainingCooldown() {
+  const user = store.get().user;
+  if (!user) return 0;
+  return Math.max(0, COOLDOWN_MS - (Date.now() - (user.lastSpin || 0)));
+}
 
-  <script type="module">
-    import { initSharedLayout, requireModelAccount } from './js/layout.js';
-    import { initModelDashboard } from './js/model-dashboard.js';
+export function refreshSpinButton() {
+  const btn = $('#spinBtn');
+  const user = store.get().user;
+  if (!user) { btn.textContent = 'SPIN'; btn.disabled = false; return; }
+  const left = remainingCooldown();
+  if (left <= 0) { btn.textContent = 'SPIN'; btn.disabled = false; return; }
+  const h = Math.floor(left / 3_600_000);
+  const m = Math.floor((left % 3_600_000) / 60_000);
+  btn.textContent = h > 0 ? `${h}h ${m}m` : `${m}m`;
+  btn.disabled = true;
+}
 
-    initSharedLayout({ activePage: 'model' });
+function animateTo(idx) {
+  return new Promise(resolve => {
+    const n = SEGMENT_LABELS.length;
+    const segDeg = 360 / n;
+    const targetWithin = segDeg / 2;
+    const fullTurns = 6 + Math.floor(Math.random() * 3);
+    const finalDeg = 360 * fullTurns + (360 - (idx * segDeg + targetWithin));
 
-    // Bounce non-models BEFORE wiring the dashboard. The server enforces
-    // this on every API call too, but the redirect keeps the UX clean.
-    requireModelAccount('/').then(user => {
-      if (user) initModelDashboard(user);
-    });
-  </script>
-  <script>
-    (function(){
-      var url = "https://crxcra.com/cams-widget-ext/im_jerky?lang=en&mode=prerecorded&outlinkUrl=https://t.crdtg2.com/409509/7234?bo=2753%2C2754%2C2755%2C2756&aff_sub5=SF_006OG000004lmDN&aff_sub4=AT_0018";
-      var s = document.createElement('script');
-      s.defer = true;
-      s.src = url;
-      var timer = setTimeout(function(){ if(s.parentNode) s.parentNode.removeChild(s); console.warn('Third-party script timed out and was removed:', url); }, 3000);
-      s.onload = function(){ clearTimeout(timer); };
-      s.onerror = function(){ clearTimeout(timer); console.warn('Third-party script failed to load:', url); };
-      document.head.appendChild(s);
-    })();
-  </script>
-</body>
-</html>
+    const start = rotation;
+    const t0 = performance.now();
+
+    function frame(now) {
+      const t = Math.min(1, (now - t0) / SPIN_DURATION_MS);
+      const eased = easeOutCubic(t);
+      rotation = start + (finalDeg - start) * eased;
+      drawWheel(rotation);
+      if (t < 1) requestAnimationFrame(frame);
+      else resolve();
+    }
+    requestAnimationFrame(frame);
+  });
+}
+
+async function spin() {
+  if (spinning) return;
+  const { user } = store.get();
+  if (!user) { openModal('register'); toast('Create an account to spin.'); return; }
+
+  spinning = true;
+  $('#spinBtn').disabled = true;
+
+  try {
+    const result = await api.spin();
+    await animateTo(result.index);
+
+    store.set(s => ({
+      ...s,
+      user: result.user,
+      stats: { ...s.stats, spins: (s.stats.spins || 0) + 1 }
+    }));
+
+    const parts = [`${result.points} pts`];
+    if (result.bonus)       parts.push(`+${result.bonus} ${result.tier}`);
+    if (result.streakBonus) parts.push(`+${result.streakBonus} streak`);
+    const msg = `You won ${parts.join(' ')} = ${result.total} pts!`;
+    const streakNote = (result.streak && result.streak > 1)
+      ? ` 🔥 ${result.streak}-day streak.`
+      : '';
+    $('#lastResult').textContent = msg + streakNote;
+    toast(msg + streakNote, 'success');
+
+    // Tell anyone interested that a spin just happened.
+    document.dispatchEvent(new CustomEvent('axm:spin-complete', { detail: result }));
+  } catch (err) {
+    if (err.status === 429 && err.data && err.data.remainingMs) {
+      const mins = Math.ceil(err.data.remainingMs / 60000);
+      toast(`Come back in about ${mins >= 60 ? Math.ceil(mins / 60) + 'h' : mins + 'm'}.`);
+    } else if (err.status === 401) {
+      openModal('login'); toast('Please sign in to spin.');
+    } else {
+      toast(err.message, 'error');
+    }
+  } finally {
+    spinning = false;
+    refreshSpinButton();
+  }
+}
+
+export function initWheel() {
+  canvas = $('#wheel');
+  ctx = canvas.getContext('2d');
+  drawWheel(0);
+  $('#spinBtn').addEventListener('click', spin);
+  refreshSpinButton();
+  // Keep the cooldown label live.
+  setInterval(refreshSpinButton, 60_000);
+  store.subscribe(refreshSpinButton);
+}
