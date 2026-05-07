@@ -17,7 +17,9 @@ function setHidden(sel, hidden) {
 
 function render(state) {
   const user = state.user;
+  const ageOk = !!state.ageConfirmed;
 
+  // Basic user action visibility
   if (user) {
     setHidden('#userChip',     false);
     setHidden('#openLogin',    true);
@@ -30,11 +32,48 @@ function render(state) {
     setHidden('#openRegister', false);
   }
 
-  // "Model dashboard" nav link is hidden by default and revealed only when
-  // the signed-in user has accountType == 'model'. Server enforces the same
-  // rule on every /api/model/* call.
-  const showModelLink = !!user && user.accountType === 'model';
-  setHidden('#navModelLink', !showModelLink);
+  // Nav visibility rules:
+  // - Anonymous + age OK: show only Players (models roster).
+  // - Registered supporters: show Players, Supporters, Marketplace.
+  // - Registered models: show Players, Cam Room, Model dashboard.
+  if (!user && ageOk) {
+    setHidden('#navPlayers', false);
+    setHidden('#navPlay', true);
+    setHidden('#navCam', true);
+    setHidden('#navMarketplace', true);
+    setHidden('#navSupporters', true);
+    setHidden('#navRoster', true);
+    setHidden('#navModelLink', true);
+  } else if (!user) {
+    // Age not confirmed: keep defaults (layout/gate will hide most UI)
+    setHidden('#navPlayers', true);
+    setHidden('#navPlay', true);
+    setHidden('#navCam', true);
+    setHidden('#navMarketplace', true);
+    setHidden('#navSupporters', true);
+    setHidden('#navRoster', true);
+    setHidden('#navModelLink', true);
+  } else {
+    // Registered user: show/hide based on accountType
+    if (user.accountType === 'model') {
+      setHidden('#navPlayers', false);
+      setHidden('#navPlay', true);
+      setHidden('#navCam', false);
+      setHidden('#navMarketplace', true);
+      setHidden('#navSupporters', true);
+      setHidden('#navRoster', true);
+      setHidden('#navModelLink', false);
+    } else {
+      // supporter or other
+      setHidden('#navPlayers', false);
+      setHidden('#navPlay', false);
+      setHidden('#navCam', false);
+      setHidden('#navMarketplace', false);
+      setHidden('#navSupporters', false);
+      setHidden('#navRoster', false);
+      setHidden('#navModelLink', true);
+    }
+  }
 
   const points = user ? user.points : 0;
   const tier = user ? (user.tier || tierFor(points)) : null;

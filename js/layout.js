@@ -46,11 +46,12 @@ function navMarkup(activePage) {
         <span class="brand-name">AxMclub<span class="brand-accent">.com</span></span>
       </a>
       <nav class="nav-links" aria-label="Primary">
-        <a class="nav-link" href="/players.html"${isActive('players')}>Players</a>
-        <a class="nav-link" href="/play.html"${isActive('play')}>Play</a>
-        <a class="nav-link" href="/cam.html"${isActive('cam')}>Cam Room</a>
-        <a class="nav-link" href="/marketplace.html"${isActive('marketplace')}>Marketplace</a>
-        <a class="nav-link" href="/supporters.html"${isActive('supporters')}>Supporters</a>
+        <a id="navPlayers" class="nav-link" href="/players.html"${isActive('players')}>Players</a>
+        <a id="navPlay" class="nav-link" href="/play.html"${isActive('play')}>Play</a>
+        <a id="navCam" class="nav-link" href="/cam.html"${isActive('cam')}>Cam Room</a>
+        <a id="navMarketplace" class="nav-link" href="/marketplace.html"${isActive('marketplace')}>Marketplace</a>
+        <a id="navSupporters" class="nav-link" href="/supporters.html"${isActive('supporters')}>Supporters</a>
+        <a id="navRoster" class="nav-link" href="/supporters.html#party-roster">AxM Party Roster</a>
         <a id="navModelLink" class="nav-link hidden" href="/model.html"${isActive('model')}>Model dashboard</a>
       </nav>
       <div class="nav-actions">

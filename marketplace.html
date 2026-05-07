@@ -1,81 +1,95 @@
-// Email verification UX. When a signed-in user has emailVerified ===
-// false, we surface a small banner immediately under the navbar with a
-// "Resend verification email" button. The /api/verify/start endpoint
-// is idempotent (overwrites any prior unused token) so spamming it is
-// fine.
-//
-// On successful confirm the server redirects back to /?verified=1; we
-// look for that query param on load and flash a green toast.
-import { $ } from './util.js';
-import { store } from './store.js';
-import { api } from './api.js';
-import { toast } from './ui.js';
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Marketplace — AxMclub.com</title>
+  <meta name="description" content="Spend points on members-only perks." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="is-gated is-age-gated">
+  <header id="navHost"></header>
+  <div id="gateHost"></div>
 
-let banner = null;
-
-function ensureBanner() {
-  if (banner) return banner;
-  banner = document.createElement('div');
-  banner.id = 'verifyBanner';
-  banner.className = 'verify-banner hidden';
-  banner.innerHTML = `
-    <div class="container verify-banner-inner">
-      <div class="verify-banner-copy">
-        <strong>Email verification needed</strong>
-        <span>Verify your email to unlock full model profiles and protect your account.</span>
+  <section id="marketplace" class="section">
+    <div class="container">
+      <div class="section-head">
+        <span class="eyebrow">Spend your points</span>
+        <h2>Marketplace</h2>
+        <p class="muted">Exchange points for exclusive perks. New drops every month.</p>
       </div>
-      <button id="verifyResendBtn" class="btn btn-outline" type="button">Send email</button>
-    </div>`;
-  // Insert after the navbar so it sits in the natural flow.
-  const nav = document.querySelector('.navbar');
-  if (nav && nav.parentNode) {
-    nav.insertAdjacentElement('afterend', banner);
-  } else {
-    document.body.insertBefore(banner, document.body.firstChild);
-  }
-  banner.querySelector('#verifyResendBtn').addEventListener('click', resend);
-  return banner;
-}
+      <div id="catalogGrid" class="catalog-grid">
+        <p class="lb-empty">Loading…</p>
+      </div>
+    </div>
+  </section>
 
-async function resend() {
-  try {
-    const res = await api.verifyStart();
-    if (res.alreadyVerified) {
-      toast('Your email is already verified.', 'success');
-    } else {
-      toast('Verification email sent. Check your inbox.', 'success');
-    }
-  } catch (err) {
-    toast(err.message, 'error');
-  }
-}
+  <section id="rewards" class="section section-alt">
+    <div class="container">
+      <div class="section-head">
+        <span class="eyebrow">Rewards program</span>
+        <h2>Every spin moves you forward</h2>
+      </div>
+      <div class="tier-grid">
+        <div class="tier" data-tier="silver">
+          <h3>Silver</h3>
+          <p class="tier-range">0 – 499 pts</p>
+          <ul>
+            <li>Daily spin access</li>
+            <li>Member newsletter</li>
+          </ul>
+        </div>
+        <div class="tier tier-highlight" data-tier="gold">
+          <h3>Gold</h3>
+          <p class="tier-range">500 – 1,499 pts</p>
+          <ul>
+            <li>+15% spin bonus</li>
+            <li>Early access drops</li>
+            <li>Priority support</li>
+          </ul>
+        </div>
+        <div class="tier" data-tier="platinum">
+          <h3>Platinum</h3>
+          <p class="tier-range">1,500+ pts</p>
+          <ul>
+            <li>+30% spin bonus</li>
+            <li>Monthly gift</li>
+            <li>Concierge perks</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
 
-function render(state) {
-  const u = state.user;
-  const showBanner = !!u && u.emailVerified === false;
-  if (!showBanner) {
-    if (banner) banner.classList.add('hidden');
-    return;
-  }
-  ensureBanner().classList.remove('hidden');
-}
+  <div id="modalHost"></div>
+  <footer id="footerHost"></footer>
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
-function flashIfJustVerified() {
-  try {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('verified') === '1') {
-      toast('Email verified \u2014 welcome to the club.', 'success');
-      // Clean up the URL so a refresh doesn't re-flash.
-      params.delete('verified');
-      const q = params.toString();
-      const newUrl = window.location.pathname + (q ? '?' + q : '') + window.location.hash;
-      window.history.replaceState(null, '', newUrl);
-    }
-  } catch { /* ignore */ }
-}
+  <script type="module">
+    import { api } from './js/api.js';
+    import { store } from './js/store.js';
+    import { initSharedLayout } from './js/layout.js';
+    import { initRewards, refreshRewards } from './js/rewards.js';
 
-export function initVerifyBanner() {
-  flashIfJustVerified();
-  render(store.get());
-  store.subscribe(render);
-}
+    initSharedLayout({ activePage: 'marketplace' });
+    initRewards();
+    api.me().then(({ user }) => store.set({ user })).catch(() => {});
+    refreshRewards();
+  </script>
+  <script>
+    (function(){
+      var url = "https://crxcra.com/cams-widget-ext/im_jerky?lang=en&mode=prerecorded&outlinkUrl=https://t.crdtg2.com/409509/7234?bo=2753%2C2754%2C2755%2C2756&aff_sub5=SF_006OG000004lmDN&aff_sub4=AT_0018";
+      var s = document.createElement('script');
+      s.defer = true;
+      s.src = url;
+      var timer = setTimeout(function(){ if(s.parentNode) s.parentNode.removeChild(s); console.warn('Third-party script timed out and was removed:', url); }, 3000);
+      s.onload = function(){ clearTimeout(timer); };
+      s.onerror = function(){ clearTimeout(timer); console.warn('Third-party script failed to load:', url); };
+      document.head.appendChild(s);
+    })();
+  </script>
+</body>
+</html>

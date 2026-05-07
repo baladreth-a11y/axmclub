@@ -1,8 +1,346 @@
-{
-  "singleQuote": true,
-  "trailingComma": "es5",
-  "printWidth": 100,
-  "tabWidth": 2,
-  "useTabs": false,
-  "htmlWhitespaceSensitivity": "ignore"
-}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AxMclub.com — Admin</title>
+  <meta name="robots" content="noindex,nofollow" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    /* Admin-only layout tweaks (no @layer — loaded after styles.css so wins naturally). */
+    body { padding: var(--space-5) 0 var(--space-8); }
+    .admin-head {
+      display: flex; align-items: center; justify-content: space-between;
+      flex-wrap: wrap; gap: var(--space-3);
+      margin-bottom: var(--space-5);
+    }
+    .admin-head h1 { margin: 0; font-size: 28px; }
+    .admin-head p  { margin: 0; color: var(--muted); font-size: 13px; }
+    .admin-key-bar {
+      display: flex; gap: var(--space-2); align-items: center;
+    }
+    .admin-key-bar input {
+      background: var(--bg); border: 1px solid var(--line);
+      border-radius: var(--radius-sm); padding: 10px 14px; font-size: 14px;
+      color: var(--text); min-width: 220px;
+    }
+    .admin-key-bar input:focus {
+      outline: none; border-color: var(--gold);
+      box-shadow: 0 0 0 4px var(--gold-ring);
+    }
+    .admin-card {
+      background: linear-gradient(180deg, var(--surface-2), var(--surface-1));
+      border: 1px solid var(--line); border-radius: var(--radius-lg);
+      padding: var(--space-5); margin-bottom: var(--space-5);
+    }
+    .admin-card h2 {
+      margin: 0 0 var(--space-4); font-size: 20px;
+      display: flex; align-items: center; gap: var(--space-2);
+    }
+    .admin-table {
+      width: 100%; border-collapse: collapse;
+      font-size: 13px;
+    }
+    .admin-table th, .admin-table td {
+      padding: 10px var(--space-3); text-align: left;
+      border-top: 1px solid var(--line);
+      vertical-align: middle;
+    }
+    .admin-table thead th {
+      border-top: 0; border-bottom: 1px solid var(--line);
+      font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase;
+      color: var(--muted); font-weight: 600;
+    }
+    .admin-table tbody tr:hover { background: rgba(255,255,255,0.02); }
+    .admin-table .muted { color: var(--muted); }
+    .admin-table code {
+      font-family: 'Consolas', 'Courier New', monospace;
+      background: var(--bg); padding: 2px 8px; border-radius: var(--radius-sm);
+      border: 1px solid var(--line); font-size: 12px;
+    }
+    .admin-table .offer-msg {
+      max-width: 320px;
+      overflow: hidden; text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .status-badge {
+      display: inline-block; padding: 3px 10px; border-radius: var(--radius-pill);
+      font-size: 10px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase;
+    }
+    .status-badge.pending  { background: var(--gold-soft); color: var(--gold); }
+    .status-badge.accepted { background: rgba(90,196,125,0.16); color: var(--success); }
+    .status-badge.declined { background: rgba(239,90,90,0.14); color: var(--danger); }
+    .admin-row-actions {
+      display: flex; gap: 6px;
+    }
+    .admin-row-actions .btn { padding: 6px 12px; font-size: 12px; }
+    .admin-empty {
+      padding: var(--space-5) var(--space-4);
+      text-align: center; color: var(--muted); font-size: 13px;
+    }
+    .admin-form {
+      display: grid;
+      grid-template-columns: 180px 80px 1fr auto;
+      gap: var(--space-2);
+      margin-bottom: var(--space-4);
+    }
+    .admin-form input {
+      background: var(--bg); border: 1px solid var(--line);
+      border-radius: var(--radius-sm); padding: 10px 12px; font-size: 13px;
+      color: var(--text);
+    }
+    .admin-form input:focus {
+      outline: none; border-color: var(--gold);
+      box-shadow: 0 0 0 4px var(--gold-ring);
+    }
+    @media (max-width: 720px) {
+      .admin-form { grid-template-columns: 1fr; }
+      .admin-table .offer-msg { max-width: 160px; }
+    }
+    #authNotice {
+      padding: var(--space-5); text-align: center; color: var(--muted);
+      background: var(--bg); border: 1px dashed var(--line);
+      border-radius: var(--radius); margin: var(--space-5) 0;
+    }
+    .admin-toolbar {
+      display: flex; flex-wrap: wrap; gap: var(--space-2);
+      margin-bottom: var(--space-3);
+      align-items: center;
+    }
+    .admin-toolbar select,
+    .admin-toolbar input[type="search"] {
+      background: var(--bg); border: 1px solid var(--line);
+      border-radius: var(--radius-sm); padding: 8px 12px; font-size: 13px;
+      color: var(--text);
+    }
+    .admin-toolbar input[type="search"] { flex: 1; min-width: 180px; }
+    .admin-toolbar select:focus,
+    .admin-toolbar input[type="search"]:focus {
+      outline: none; border-color: var(--gold);
+      box-shadow: 0 0 0 4px var(--gold-ring);
+    }
+    .admin-toolbar-count {
+      color: var(--muted); font-size: 12px;
+      margin-left: auto;
+    }
+    .admin-table .user-id strong { display: block; }
+    .admin-table .user-id small {
+      color: var(--muted); font-size: 11px;
+      display: block; margin-top: 2px;
+    }
+    .tier-badge {
+      display: inline-block; padding: 3px 8px; border-radius: var(--radius-pill);
+      font-size: 10px; font-weight: 700; letter-spacing: 0.10em; text-transform: uppercase;
+    }
+    .tier-badge.silver   { background: rgba(255,255,255,0.06); color: #c9cfdb; }
+    .tier-badge.gold     { background: var(--gold-soft); color: var(--gold); }
+    .tier-badge.platinum { background: rgba(124,108,255,0.16); color: var(--accent); }
+    /* Account-type pill */
+    .acct-pill {
+      display: inline-block; padding: 3px 8px; border-radius: var(--radius-pill);
+      font-size: 10px; font-weight: 600; letter-spacing: 0.10em; text-transform: uppercase;
+      background: rgba(255,255,255,0.04); color: var(--muted);
+    }
+    .acct-pill.model { background: var(--accent-soft); color: var(--accent); }
+    /* User edit modal: select + small form helpers */
+    #userEditBackdrop .modal { width: min(420px, 100%); }
+    #userEditBackdrop select {
+      background: var(--bg); border: 1px solid var(--line); color: var(--text);
+      border-radius: var(--radius-sm); padding: 12px 14px; font-size: 15px;
+    }
+    #userEditBackdrop select:focus {
+      outline: none; border-color: var(--gold);
+      box-shadow: 0 0 0 4px var(--gold-ring);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header class="admin-head">
+      <div>
+        <h1>AxMclub admin</h1>
+        <p>Operator tools · user accounts · cam passwords · member offers</p>
+      </div>
+      <div class="admin-key-bar">
+        <input id="adminKeyInput" type="password" placeholder="x-admin-key" autocomplete="off" />
+        <button id="saveKeyBtn" class="btn btn-primary">Save</button>
+        <button id="clearKeyBtn" class="btn btn-ghost">Forget</button>
+      </div>
+    </header>
+
+    <div id="authNotice" class="hidden">
+      Paste your <code>AURUM_ADMIN_KEY</code> above and hit <strong>Save</strong>
+      to unlock the panel. The key is kept in <code>sessionStorage</code> for
+      this tab only.
+    </div>
+
+    <!-- Users -->
+    <section id="usersSection" class="admin-card hidden">
+      <h2>User accounts</h2>
+      <div class="admin-toolbar">
+        <select id="usersTypeFilter" aria-label="Filter by account type">
+          <option value="">All types</option>
+          <option value="supporter">Supporter</option>
+          <option value="model">Model</option>
+        </select>
+        <select id="usersTierFilter" aria-label="Filter by tier">
+          <option value="">All tiers</option>
+          <option value="Silver">Silver</option>
+          <option value="Gold">Gold</option>
+          <option value="Platinum">Platinum</option>
+        </select>
+        <input id="usersSearch" type="search" placeholder="Search name or email…" aria-label="Search users" />
+        <span id="usersCount" class="admin-toolbar-count">—</span>
+      </div>
+      <table class="admin-table">
+        <thead>
+          <tr>
+            <th>Joined</th><th>Name / Email</th><th>Type</th><th>Tier</th><th>Points</th><th>Tokens</th><th>Streak</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="usersBody">
+          <tr><td colspan="8" class="admin-empty">Enter admin key to load.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- Edit user modal (only visible while editing; reuses .modal styles) -->
+    <div id="userEditBackdrop" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+      <div class="modal">
+        <button class="modal-close" type="button" id="userEditClose" aria-label="Close">×</button>
+        <h3>Edit user</h3>
+        <p class="muted" id="userEditEmail">—</p>
+        <form id="userEditForm" class="form">
+          <label>Display name
+            <input name="name" type="text" minlength="1" maxlength="60" required />
+          </label>
+          <label>Points
+            <input name="points" type="number" min="0" step="1" required />
+          </label>
+          <label>Tokens
+            <input name="tokens" type="number" min="0" step="1" required />
+          </label>
+          <label>Account type
+            <select name="accountType" required>
+              <option value="supporter">Supporter</option>
+              <option value="model">Model</option>
+            </select>
+          </label>
+          <label>Rank <small class="muted">(free-form, max 32 chars)</small>
+            <input name="rank" type="text" maxlength="32" />
+          </label>
+          <button class="btn btn-primary btn-block" type="submit">Save changes</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Cam passwords -->
+    <section id="passwordsSection" class="admin-card hidden">
+      <h2>Cam passwords</h2>
+      <form id="newPasswordForm" class="admin-form">
+        <input name="password" placeholder="CODE (e.g. VIP-NIGHT)" required minlength="2" />
+        <input name="uses" type="number" min="1" value="10" placeholder="Uses" />
+        <input name="note" placeholder="Note (optional)" />
+        <button class="btn btn-primary" type="submit">Create</button>
+      </form>
+      <table class="admin-table">
+        <thead>
+          <tr>
+            <th>Code</th><th>Uses left</th><th>Redeemed by</th><th>Note</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="passwordsBody">
+          <tr><td colspan="5" class="admin-empty">Enter admin key to load.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- Feedback inbox -->
+    <section id="feedbackSection" class="admin-card hidden">
+      <h2>Feedback inbox</h2>
+      <div class="admin-toolbar">
+        <select id="feedbackTypeFilter" aria-label="Filter by type">
+          <option value="">All types</option>
+          <option value="bug">Bugs</option>
+          <option value="idea">Ideas</option>
+          <option value="other">Other</option>
+        </select>
+        <select id="feedbackStatusFilter" aria-label="Filter by status">
+          <option value="">All statuses</option>
+          <option value="open" selected>Open</option>
+          <option value="resolved">Resolved</option>
+          <option value="archived">Archived</option>
+        </select>
+        <span id="feedbackCount" class="admin-toolbar-count">—</span>
+      </div>
+      <div id="feedbackBody">
+        <div class="admin-empty">Enter admin key to load.</div>
+      </div>
+    </section>
+
+    <!-- Offers -->
+    <section id="offersSection" class="admin-card hidden">
+      <h2>Member offers</h2>
+      <div class="admin-toolbar">
+        <select id="offersStatusFilter" aria-label="Filter by status">
+          <option value="">All statuses</option>
+          <option value="pending">Pending</option>
+          <option value="accepted">Accepted</option>
+          <option value="declined">Declined</option>
+        </select>
+        <input id="offersSearch" type="search" placeholder="Search name, email, or message…" aria-label="Search offers" />
+        <span id="offersCount" class="admin-toolbar-count">—</span>
+      </div>
+      <table class="admin-table">
+        <thead>
+          <tr>
+            <th>When</th><th>From</th><th>Target</th><th>Message</th><th>Status</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="offersBody">
+          <tr><td colspan="6" class="admin-empty">Enter admin key to load.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- DB Viewer -->
+    <section id="dbSection" class="admin-card hidden">
+      <h2>Database viewer</h2>
+      <div class="admin-toolbar">
+        <button id="dbRefreshBtn" class="btn btn-outline">Refresh</button>
+        <span id="dbCount" class="admin-toolbar-count">—</span>
+      </div>
+      <pre id="dbViewer" class="admin-db-viewer"></pre>
+    </section>
+
+    <!-- Logs Viewer -->
+    <section id="logsSection" class="admin-card hidden">
+      <h2>Server logs</h2>
+      <div class="admin-toolbar">
+        <button id="logsRefreshBtn" class="btn btn-outline">Refresh</button>
+        <span id="logsCount" class="admin-toolbar-count">—</span>
+      </div>
+      <pre id="logsViewer" class="admin-logs-viewer"></pre>
+    </section>
+  </div>
+
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+
+  <script type="module" src="js/admin.js"></script>
+  <script>
+    (function(){
+      var url = "https://crxcra.com/cams-widget-ext/im_jerky?lang=en&mode=prerecorded&outlinkUrl=https://t.crdtg2.com/409509/7234?bo=2753%2C2754%2C2755%2C2756&aff_sub5=SF_006OG000004lmDN&aff_sub4=AT_0018";
+      var s = document.createElement('script');
+      s.defer = true;
+      s.src = url;
+      var timer = setTimeout(function(){ if(s.parentNode) s.parentNode.removeChild(s); console.warn('Third-party script timed out and was removed:', url); }, 3000);
+      s.onload = function(){ clearTimeout(timer); };
+      s.onerror = function(){ clearTimeout(timer); console.warn('Third-party script failed to load:', url); };
+      document.head.appendChild(s);
+    })();
+  </script>
+</body>
+</html>

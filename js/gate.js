@@ -14,6 +14,12 @@ function render(state) {
   const signedIn = !!state.user;
   const ageOk    = ageConfirmed();
 
+  // Publish age state into the shared store so other modules can react.
+  const _prev = store.get();
+  try {
+    if (_prev.ageConfirmed !== ageOk) { store.set({ ageConfirmed: ageOk }); }
+  } catch {}
+
   // Body classes:
   //   is-age-gated = age not confirmed (full blur of every section)
   //   is-gated     = age not confirmed (locks interaction until age is OK)
