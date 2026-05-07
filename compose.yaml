@@ -1,0 +1,6 @@
+services:
+  axmclub:
+    image: axmclub
+    build:
+      context: .
+      dockerfile: ./Dockerfile
