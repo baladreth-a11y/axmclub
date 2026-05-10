@@ -285,7 +285,9 @@ function New-Salt {
   return [Convert]::ToBase64String($bytes)
 }
 
-function Get-PasswordHash($password, $salt) {
+function Get-PasswordHash {
+  [Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSAvoidUsingPlainTextForPassword", "")]
+  param($password, $salt)
   # Use PBKDF2 (Rfc2898) with SHA256 and strong iteration count
   $iterations = 100000
   try {
@@ -416,7 +418,7 @@ function Slugify([string]$s) {
 
 # Generate a unique slug for a user from their display name. If a
 # different user already owns the same slug, suffix '-2', '-3', etc.
-function Ensure-Slug($db, $u) {
+function Initialize-Slug($db, $u) {
   if ($u.slug) { return [string]$u.slug }
   $base = Slugify $u.name
   $candidate = $base
@@ -438,7 +440,7 @@ function Ensure-Slug($db, $u) {
 
 # Validate / canonicalize a gender string. Returns the lower-cased
 # gender if it is in the allowed set; otherwise returns $null.
-function Validate-Gender($v) {
+function Resolve-Gender($v) {
   if ($null -eq $v) { return $null }
   $g = ([string]$v).Trim().ToLowerInvariant()
   if ($g -eq '') { return '' }
@@ -461,12 +463,12 @@ function Get-ModelByEmailOrSlug($db, [string]$key) {
 # Default DM policy depends on account type. Models opt in to the open
 # inbox so supporters can reach them; supporters keep DMs open by default
 # too, but each user can switch to mutual/closed via /api/chat/policy.
-function Default-DmPolicy([string]$accountType) {
+function Get-DefaultDmPolicy([string]$accountType) {
   return 'open'
 }
 
 # Default cam2cam opt-in: models on, supporters off (until they opt in).
-function Default-Cam2Cam([string]$accountType) {
+function Get-DefaultCam2Cam([string]$accountType) {
   if ("$accountType".ToLowerInvariant() -eq 'model') { return $true }
   return $false
 }
@@ -492,7 +494,7 @@ function Get-ThreadId([string]$a, [string]$b) {
   return $sb.ToString().Substring(0, 32)
 }
 
-function Public-User($u) {
+function Get-PublicUser($u) {
   if (-not $u) { return $null }
   $redCount = 0
   if ($u.redemptions) { $redCount = @($u.redemptions).Count }
@@ -529,11 +531,11 @@ function Public-User($u) {
   }
   $lastSeen = 0
   if ($u.lastSeenMs) { $lastSeen = [long]$u.lastSeenMs }
-  $cam2cam = Default-Cam2Cam $acct
+  $cam2cam = Get-DefaultCam2Cam $acct
   if ($u.PSObject.Properties['cam2cam'] -or ($u -is [hashtable] -and $u.ContainsKey('cam2cam'))) {
     $cam2cam = [bool]$u.cam2cam
   }
-  $dmPolicy = Default-DmPolicy $acct
+  $dmPolicy = Get-DefaultDmPolicy $acct
   if ($u.dmPolicy) {
     $candidate = ([string]$u.dmPolicy).ToLowerInvariant()
     if ($Script:DmPolicies -contains $candidate) { $dmPolicy = $candidate }
@@ -569,7 +571,7 @@ function Public-User($u) {
 
 # Public model card. Strips PII / scoring info that supporters don't need.
 # Used by GET /api/models (no auth) and to compose the detail payload.
-function Public-Model($u) {
+function Get-PublicModel($u) {
   if (-not $u) { return $null }
   $gender = ''
   if ($u.gender) { $gender = [string]$u.gender }
@@ -603,8 +605,8 @@ function Public-Model($u) {
 }
 
 # Public model with full gallery. Returned only to verified, signed-in users.
-function Public-Model-Detail($u) {
-  $base = Public-Model $u
+function Get-PublicModelDetail($u) {
+  $base = Get-PublicModel $u
   $gallery = @()
   if ($u.gallery) {
     foreach ($g in @($u.gallery)) {
@@ -621,7 +623,7 @@ function Public-Model-Detail($u) {
 
 # Resolve the on-disk uploads directory for a model and create it on demand.
 # Returns the absolute path. Caller is expected to write under it; the
-# path-traversal guard in Process-Request still protects the rest of the tree.
+# path-traversal guard in Invoke-RequestHandler still protects the rest of the tree.
 function Get-ModelUploadDir([string]$slug) {
   if (-not $slug) { $slug = 'misc' }
   $dir = Join-Path (Join-Path $UploadsDir 'models') $slug
@@ -857,7 +859,7 @@ function Get-SessionUser($req, $db) {
   return @{ sid = $sid; user = $db.users[$email] }
 }
 
-function Session-Cookie($sid) {
+function New-SessionCookie($sid) {
   return "sid=$sid; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000"
 }
 
@@ -869,21 +871,21 @@ function Session-Cookie($sid) {
 #  whether the response was a success or a structured error), and $false
 #  when the route belongs to a different domain.
 #
-#  Process-Api is the top-level dispatcher that walks the sub-handlers in
+#  Invoke-ApiHandler is the top-level dispatcher that walks the sub-handlers in
 #  order and sends a 404 if none of them claim the route.
 #
 #  Adding a new endpoint:
 #    1. Pick the domain it belongs to (or add a new Handle-X function).
 #    2. Add a new case to that handler's switch statement.
-#    3. Use `Require-Auth` to cut the 3-line 401 guard when the endpoint
+#    3. Use `Assert-Auth` to cut the 3-line 401 guard when the endpoint
 #       needs a signed-in user.
 # ==========================================================================
 
 # Returns the logged-in user on success. On failure writes a 401 and
 # returns $null. Inside a handler:
-#   $u = Require-Auth $req $resp $db
+#   $u = Assert-Auth $req $resp $db
 #   if (-not $u) { return $true }   # the 401 has already been sent
-function Require-Auth($req, $resp, $db) {
+function Assert-Auth($req, $resp, $db) {
   $s = Get-SessionUser $req $db
   if (-not $s) {
     Send-Json $resp @{ error = 'Sign in required.'; reason = 'sign-in' } 401
@@ -907,7 +909,7 @@ function Require-Auth($req, $resp, $db) {
 # the AURUM_ADMIN_KEY env var. On failure writes a 403 and returns $false.
 # Admin auth is intentionally env-driven so the admin panel stays disabled
 # until an operator opts in by setting the key.
-function Require-Admin($req, $resp) {
+function Assert-Admin($req, $resp) {
   $adminKey = $env:AURUM_ADMIN_KEY
   $given    = $req.Headers['x-admin-key']
   if (-not $adminKey -or $given -ne $adminKey) {
@@ -920,8 +922,8 @@ function Require-Admin($req, $resp) {
 # Returns the logged-in user when their accountType is 'model'. On failure
 # writes a 401 (signed-out) or 403 (signed-in supporter) and returns $null.
 # Used by every /api/model/* handler.
-function Require-Model($req, $resp, $db) {
-  $u = Require-Auth $req $resp $db
+function Assert-Model($req, $resp, $db) {
+  $u = Assert-Auth $req $resp $db
   if (-not $u) { return $null }
   $acct = ''
   if ($u.accountType) { $acct = [string]$u.accountType }
@@ -933,7 +935,7 @@ function Require-Model($req, $resp, $db) {
 }
 
 # ---- Auth: register / login / logout / me -------------------------------
-function Process-Auth($req, $resp, $db, $path, $method) {
+function Invoke-AuthHandler($req, $resp, $db, $path, $method) {
   $key = "$method $path"
   switch ($key) {
 
@@ -993,10 +995,10 @@ function Process-Auth($req, $resp, $db, $path, $method) {
           brandColor    = ''
           socials       = @{ telegram=''; snap=''; webcam=''; fansite='' }
           lastSeenMs    = NowMs
-          cam2cam       = (Default-Cam2Cam $accountType)
-          dmPolicy      = (Default-DmPolicy $accountType)
+          cam2cam       = (Get-DefaultCam2Cam $accountType)
+          dmPolicy      = (Get-DefaultDmPolicy $accountType)
         }
-        Ensure-Slug $db $db.users[$email] | Out-Null
+        Initialize-Slug $db $db.users[$email] | Out-Null
         $db.stats.members = [int]$db.stats.members + 1
         $sid = New-Token
         $db.sessions[$sid] = $email
@@ -1016,7 +1018,7 @@ function Process-Auth($req, $resp, $db, $path, $method) {
 
         Write-Host "[Register] Success: $email registered as $accountType"
         Send-VerifyEmail $email $name $verifyToken $req.Headers['Host']
-        Send-Json $resp @{ user = (Public-User $db.users[$email]) } 200 @((Session-Cookie $sid))
+        Send-Json $resp @{ user = (Get-PublicUser $db.users[$email]) } 200 @((New-SessionCookie $sid))
         return $true
       } catch {
         Write-Host "[Register] Error: $_"
@@ -1042,7 +1044,7 @@ function Process-Auth($req, $resp, $db, $path, $method) {
       $sid = New-Token
       $db.sessions[$sid] = $email
       Save-Db $db
-      Send-Json $resp @{ user = (Public-User $u) } 200 @((Session-Cookie $sid))
+      Send-Json $resp @{ user = (Get-PublicUser $u) } 200 @((New-SessionCookie $sid))
       return $true
     }
 
@@ -1057,7 +1059,7 @@ function Process-Auth($req, $resp, $db, $path, $method) {
     'GET /api/me' {
       $s = Get-SessionUser $req $db
       if (-not $s) { Send-Json $resp @{ user = $null }; return $true }
-      Send-Json $resp @{ user = (Public-User $s.user) }
+      Send-Json $resp @{ user = (Get-PublicUser $s.user) }
       return $true
     }
   }
@@ -1065,7 +1067,7 @@ function Process-Auth($req, $resp, $db, $path, $method) {
 }
 
 # ---- Stats --------------------------------------------------------------
-function Process-Stats($req, $resp, $db, $path, $method) {
+function Invoke-StatsHandler($req, $resp, $db, $path, $method) {
   if ("$method $path" -eq 'GET /api/stats') {
     Send-Json $resp @{ members = [int]$db.stats.members; spins = [int]$db.stats.spins }
     return $true
@@ -1074,12 +1076,12 @@ function Process-Stats($req, $resp, $db, $path, $method) {
 }
 
 # ---- Roulette: spin + history ------------------------------------------
-function Process-Roulette($req, $resp, $db, $path, $method) {
+function Invoke-RouletteHandler($req, $resp, $db, $path, $method) {
   $key = "$method $path"
   switch ($key) {
 
     'POST /api/spin' {
-      $u = Require-Auth $req $resp $db
+      $u = Assert-Auth $req $resp $db
       if (-not $u) { return $true }
       $body = Read-JsonBody $req
       $variantId = ("$($body.variantId)").Trim().ToLower()
@@ -1150,7 +1152,7 @@ function Process-Roulette($req, $resp, $db, $path, $method) {
         total       = $total
         tier        = $tier.name
         variantId   = $variantId
-        user        = (Public-User $u)
+        user        = (Get-PublicUser $u)
       }
       return $true
     }
@@ -1181,7 +1183,7 @@ function Process-Roulette($req, $resp, $db, $path, $method) {
 }
 
 # ---- Rewards: list / redeem / redemptions ------------------------------
-function Process-Rewards($req, $resp, $db, $path, $method) {
+function Invoke-RewardsHandler($req, $resp, $db, $path, $method) {
   $key = "$method $path"
   switch ($key) {
 
@@ -1222,7 +1224,7 @@ function Process-Rewards($req, $resp, $db, $path, $method) {
     }
 
     'POST /api/redeem' {
-      $u = Require-Auth $req $resp $db
+      $u = Assert-Auth $req $resp $db
       if (-not $u) { return $true }
       $body = Read-JsonBody $req
       $rewardId = ("$($body.rewardId)").Trim()
@@ -1286,7 +1288,7 @@ function Process-Rewards($req, $resp, $db, $path, $method) {
 
       Send-Json $resp @{
         redemption = $redemption
-        user       = (Public-User $u)
+        user       = (Get-PublicUser $u)
       }
       return $true
     }
@@ -1304,12 +1306,12 @@ function Process-Rewards($req, $resp, $db, $path, $method) {
 }
 
 # ---- Economy: tokens/buy + offer ---------------------------------------
-function Process-Economy($req, $resp, $db, $path, $method) {
+function Invoke-EconomyHandler($req, $resp, $db, $path, $method) {
   $key = "$method $path"
   switch ($key) {
 
     'POST /api/tokens/buy' {
-      $u = Require-Auth $req $resp $db
+      $u = Assert-Auth $req $resp $db
       if (-not $u) { return $true }
       $body = Read-JsonBody $req
       $amount = 0
@@ -1326,13 +1328,13 @@ function Process-Economy($req, $resp, $db, $path, $method) {
       Send-Json $resp @{
         ok     = $true
         bought = $amount
-        user   = (Public-User $u)
+        user   = (Get-PublicUser $u)
       }
       return $true
     }
 
     'POST /api/offer' {
-      $u = Require-Auth $req $resp $db
+      $u = Assert-Auth $req $resp $db
       if (-not $u) { return $true }
       $body = Read-JsonBody $req
       $target  = ("$($body.target)").Trim()
@@ -1364,7 +1366,7 @@ function Process-Economy($req, $resp, $db, $path, $method) {
 # both maps and drops any call whose touchedAt is older than the absolute
 # TTL or whose pending invite has aged past the request TTL. Called from
 # the top of every cam call endpoint so callers always see fresh state.
-function Prune-Calls {
+function Clear-ExpiredCalls {
   if (-not $Script:Calls) { $Script:Calls = @{} }
   if (-not $Script:CallSignals) { $Script:CallSignals = @{} }
   $now = NowMs
@@ -1387,7 +1389,7 @@ function Get-CallById([string]$id) {
   return $Script:Calls[$id]
 }
 
-function Public-Call($c, [string]$myEmail) {
+function Get-PublicCall($c, [string]$myEmail) {
   if (-not $c) { return $null }
   $from = ([string]$c.from).ToLowerInvariant()
   $role = if ($from -eq $myEmail) { 'caller' } else { 'callee' }
@@ -1405,12 +1407,12 @@ function Public-Call($c, [string]$myEmail) {
 }
 
 # ---- Cam room: status / redeem-password / create-password / cam2cam ----
-function Process-Cam($req, $resp, $db, $path, $method) {
+function Invoke-CamHandler($req, $resp, $db, $path, $method) {
   $key = "$method $path"
   switch ($key) {
 
     'GET /api/cam/status' {
-      $u = Require-Auth $req $resp $db
+      $u = Assert-Auth $req $resp $db
       if (-not $u) { return $true }
       $now = NowMs
       $exp = [long]0
@@ -1426,7 +1428,7 @@ function Process-Cam($req, $resp, $db, $path, $method) {
     }
 
     'POST /api/cam/redeem-password' {
-      $u = Require-Auth $req $resp $db
+      $u = Assert-Auth $req $resp $db
       if (-not $u) { return $true }
       $body = Read-JsonBody $req
       $pw = ("$($body.password)").Trim().ToUpper()
@@ -1457,13 +1459,13 @@ function Process-Cam($req, $resp, $db, $path, $method) {
         note           = $entry.note
         camPassExpires = [long]$u.camPassExpires
         remainingMs    = $Script:CamPassDurationMs
-        user           = (Public-User $u)
+        user           = (Get-PublicUser $u)
       }
       return $true
     }
 
     'POST /api/cam/create-password' {
-      if (-not (Require-Admin $req $resp)) { return $true }
+      if (-not (Assert-Admin $req $resp)) { return $true }
       $body = Read-JsonBody $req
       $pw = ("$($body.password)").Trim().ToUpper()
       $uses = 1
@@ -1482,7 +1484,7 @@ function Process-Cam($req, $resp, $db, $path, $method) {
     # Toggle the caller's own cam2cam opt-in. Persisted on the user record
     # so it survives restarts and is reflected in /api/me + /api/online.
     'POST /api/cam2cam' {
-      $u = Require-Auth $req $resp $db
+      $u = Assert-Auth $req $resp $db
       if (-not $u) { return $true }
       $body = Read-JsonBody $req
       $enabled = $false
@@ -1491,7 +1493,7 @@ function Process-Cam($req, $resp, $db, $path, $method) {
       }
       $u.cam2cam = $enabled
       Save-Db $db
-      Send-Json $resp @{ ok = $true; cam2cam = $enabled; user = (Public-User $u) }
+      Send-Json $resp @{ ok = $true; cam2cam = $enabled; user = (Get-PublicUser $u) }
       return $true
     }
 
@@ -1499,7 +1501,7 @@ function Process-Cam($req, $resp, $db, $path, $method) {
     # Generates an ephemeral call id; the callee will see it on the next
     # /api/cam/inbox poll.
     'POST /api/cam/request' {
-      $u = Require-Auth $req $resp $db
+      $u = Assert-Auth $req $resp $db
       if (-not $u) { return $true }
       Prune-Calls
       $body = Read-JsonBody $req
@@ -1509,8 +1511,8 @@ function Process-Cam($req, $resp, $db, $path, $method) {
       if ($to -eq $myEmailLc) { Send-Json $resp @{ error = 'Cannot call yourself.' } 400; return $true }
       if (-not $db.users.ContainsKey($to)) { Send-Json $resp @{ error = 'Peer not found.' } 404; return $true }
       $peer = $db.users[$to]
-      $myCam = (Public-Online $u).cam2cam
-      $peerCam = (Public-Online $peer).cam2cam
+      $myCam = (Get-PublicOnlineUser $u).cam2cam
+      $peerCam = (Get-PublicOnlineUser $peer).cam2cam
       if (-not ($myCam -and $peerCam)) {
         Send-Json $resp @{ error = 'Both users must enable cam2cam.'; reason = 'cam2cam-off' } 403
         return $true
@@ -1554,7 +1556,7 @@ function Process-Cam($req, $resp, $db, $path, $method) {
     # `since` cursor is a touchedAt timestamp; the client tracks the
     # newest one it has seen and re-polls every 2s.
     'GET /api/cam/inbox' {
-      $u = Require-Auth $req $resp $db
+      $u = Assert-Auth $req $resp $db
       if (-not $u) { return $true }
       Prune-Calls
       $since = 0
@@ -1571,7 +1573,7 @@ function Process-Cam($req, $resp, $db, $path, $method) {
         $to = ([string]$c.to).ToLowerInvariant()
         if ($from -ne $myEmail -and $to -ne $myEmail) { continue }
         if ([long]$c.touchedAt -le $since) { continue }
-        $list += (Public-Call $c $myEmail)
+        $list += (Get-PublicCall $c $myEmail)
       }
       Send-Json $resp @{ calls = @($list); now = $now }
       return $true
@@ -1579,7 +1581,7 @@ function Process-Cam($req, $resp, $db, $path, $method) {
 
     # Callee accepts or declines a pending request.
     'POST /api/cam/respond' {
-      $u = Require-Auth $req $resp $db
+      $u = Assert-Auth $req $resp $db
       if (-not $u) { return $true }
       Prune-Calls
       $body = Read-JsonBody $req
@@ -1607,7 +1609,7 @@ function Process-Cam($req, $resp, $db, $path, $method) {
 
     # Append a SDP/ICE/bye payload to the call's signal queue.
     'POST /api/cam/signal' {
-      $u = Require-Auth $req $resp $db
+      $u = Assert-Auth $req $resp $db
       if (-not $u) { return $true }
       Prune-Calls
       $body = Read-JsonBody $req
@@ -1656,7 +1658,7 @@ function Process-Cam($req, $resp, $db, $path, $method) {
     # Long-poll target: returns signals from the OTHER side newer than
     # the caller's `since` cursor.
     'GET /api/cam/signal' {
-      $u = Require-Auth $req $resp $db
+      $u = Assert-Auth $req $resp $db
       if (-not $u) { return $true }
       Prune-Calls
       $id = ''
@@ -1703,7 +1705,7 @@ function Process-Cam($req, $resp, $db, $path, $method) {
     # Either side ends the call. The signal queue stays in memory until
     # Prune-Calls drops it (so trailing 'bye' signals can still be read).
     'POST /api/cam/end' {
-      $u = Require-Auth $req $resp $db
+      $u = Assert-Auth $req $resp $db
       if (-not $u) { return $true }
       $body = Read-JsonBody $req
       $id = ("$($body.id)").Trim()
@@ -1729,7 +1731,7 @@ function Process-Cam($req, $resp, $db, $path, $method) {
 }
 
 # ---- Model dashboard: own profile, own passwords, targeted offers ------
-# Every endpoint here requires accountType=='model'. The Require-Model
+# Every endpoint here requires accountType=='model'. The Assert-Model
 # helper writes the right 401/403 and returns $null on failure.
 #
 # Ownership rules:
@@ -1739,20 +1741,20 @@ function Process-Cam($req, $resp, $db, $path, $method) {
 #   * Offers are stored on the supporter who sent them. A model sees an
 #     offer when its `target` matches their display name (case-insensitive).
 #   * Profile fields (bio, brandColor, socials.*) live on the user record
-#     itself and are exposed by Public-User.
-function Process-Model($req, $resp, $db, $path, $method) {
+#     itself and are exposed by Get-PublicUser.
+function Invoke-ModelHandler($req, $resp, $db, $path, $method) {
   $key = "$method $path"
   switch ($key) {
 
     'GET /api/model/profile' {
-      $u = Require-Model $req $resp $db
+      $u = Assert-Model $req $resp $db
       if (-not $u) { return $true }
-      Send-Json $resp @{ user = (Public-User $u) }
+      Send-Json $resp @{ user = (Get-PublicUser $u) }
       return $true
     }
 
     'POST /api/model/profile' {
-      $u = Require-Model $req $resp $db
+      $u = Assert-Model $req $resp $db
       if (-not $u) { return $true }
       $body = Read-JsonBody $req
       $changes = @{}
@@ -1795,7 +1797,7 @@ function Process-Model($req, $resp, $db, $path, $method) {
       }
       # Gender (one of male|female|crossdresser|transsexual or empty).
       if ($body.PSObject.Properties['gender'] -or $body.ContainsKey('gender')) {
-        $g = Validate-Gender $body.gender
+        $g = Resolve-Gender $body.gender
         if ($null -eq $g) {
           Send-Json $resp @{ error = 'Invalid gender. Allowed: male, female, crossdresser, transsexual.' } 400
           return $true
@@ -1819,14 +1821,14 @@ function Process-Model($req, $resp, $db, $path, $method) {
         return $true
       }
       # Ensure the model has a slug for outbound public links.
-      Ensure-Slug $db $u | Out-Null
+      Initialize-Slug $db $u | Out-Null
       Save-Db $db
-      Send-Json $resp @{ ok = $true; changes = $changes; user = (Public-User $u) }
+      Send-Json $resp @{ ok = $true; changes = $changes; user = (Get-PublicUser $u) }
       return $true
     }
 
     'GET /api/model/passwords' {
-      $u = Require-Model $req $resp $db
+      $u = Assert-Model $req $resp $db
       if (-not $u) { return $true }
       $list = @()
       foreach ($code in $Script:CamPasswords.Keys) {
@@ -1850,7 +1852,7 @@ function Process-Model($req, $resp, $db, $path, $method) {
     }
 
     'POST /api/model/passwords' {
-      $u = Require-Model $req $resp $db
+      $u = Assert-Model $req $resp $db
       if (-not $u) { return $true }
       $body = Read-JsonBody $req
       $pw = ("$($body.password)").Trim().ToUpper()
@@ -1880,7 +1882,7 @@ function Process-Model($req, $resp, $db, $path, $method) {
     }
 
     'POST /api/model/passwords/revoke' {
-      $u = Require-Model $req $resp $db
+      $u = Assert-Model $req $resp $db
       if (-not $u) { return $true }
       $body = Read-JsonBody $req
       $code = ("$($body.code)").Trim().ToUpper()
@@ -1901,7 +1903,7 @@ function Process-Model($req, $resp, $db, $path, $method) {
     }
 
     'GET /api/model/offers' {
-      $u = Require-Model $req $resp $db
+      $u = Assert-Model $req $resp $db
       if (-not $u) { return $true }
       $myName = ($u.name + '').ToLower()
       $all = @()
@@ -1931,7 +1933,7 @@ function Process-Model($req, $resp, $db, $path, $method) {
     }
 
     'POST /api/model/offers/respond' {
-      $u = Require-Model $req $resp $db
+      $u = Assert-Model $req $resp $db
       if (-not $u) { return $true }
       $body = Read-JsonBody $req
       $email   = ("$($body.userEmail)").Trim().ToLower()
@@ -1975,7 +1977,7 @@ function Process-Model($req, $resp, $db, $path, $method) {
     }
 
     'GET /api/model/stats' {
-      $u = Require-Model $req $resp $db
+      $u = Assert-Model $req $resp $db
       if (-not $u) { return $true }
       $passwordsIssued = 0
       $passwordsActive = 0
@@ -2024,12 +2026,12 @@ function Process-Model($req, $resp, $db, $path, $method) {
 }
 
 # ---- Admin: inspect passwords and offers --------------------------------
-function Process-Admin($req, $resp, $db, $path, $method) {
+function Invoke-AdminHandler($req, $resp, $db, $path, $method) {
   $key = "$method $path"
   switch ($key) {
 
     'GET /api/admin/passwords' {
-      if (-not (Require-Admin $req $resp)) { return $true }
+      if (-not (Assert-Admin $req $resp)) { return $true }
       $list = @()
       foreach ($code in $Script:CamPasswords.Keys) {
         $entry = $Script:CamPasswords[$code]
@@ -2051,7 +2053,7 @@ function Process-Admin($req, $resp, $db, $path, $method) {
     }
 
     'POST /api/admin/passwords/revoke' {
-      if (-not (Require-Admin $req $resp)) { return $true }
+      if (-not (Assert-Admin $req $resp)) { return $true }
       $body = Read-JsonBody $req
       $code = ("$($body.code)").Trim().ToUpper()
       if (-not $code -or -not $Script:CamPasswords.ContainsKey($code)) {
@@ -2064,7 +2066,7 @@ function Process-Admin($req, $resp, $db, $path, $method) {
     }
 
     'GET /api/admin/offers' {
-      if (-not (Require-Admin $req $resp)) { return $true }
+      if (-not (Assert-Admin $req $resp)) { return $true }
       $all = @()
       foreach ($email in $db.users.Keys) {
         $u = $db.users[$email]
@@ -2089,7 +2091,7 @@ function Process-Admin($req, $resp, $db, $path, $method) {
     }
 
     'POST /api/admin/offers/status' {
-      if (-not (Require-Admin $req $resp)) { return $true }
+      if (-not (Assert-Admin $req $resp)) { return $true }
       $body = Read-JsonBody $req
       $email   = ("$($body.userEmail)").Trim().ToLower()
       $offerId = ("$($body.offerId)").Trim()
@@ -2126,7 +2128,7 @@ function Process-Admin($req, $resp, $db, $path, $method) {
     }
 
     'GET /api/admin/users' {
-      if (-not (Require-Admin $req $resp)) { return $true }
+      if (-not (Assert-Admin $req $resp)) { return $true }
       $list = @()
       foreach ($email in $db.users.Keys) {
         $u = $db.users[$email]
@@ -2153,7 +2155,7 @@ function Process-Admin($req, $resp, $db, $path, $method) {
     }
 
     'POST /api/admin/users/adjust' {
-      if (-not (Require-Admin $req $resp)) { return $true }
+      if (-not (Assert-Admin $req $resp)) { return $true }
       $body = Read-JsonBody $req
       $email = ("$($body.email)").Trim().ToLower()
       if (-not $db.users.ContainsKey($email)) {
@@ -2205,12 +2207,12 @@ function Process-Admin($req, $resp, $db, $path, $method) {
         return $true
       }
       Save-Db $db
-      Send-Json $resp @{ ok = $true; email = $email; changes = $changes; user = (Public-User $u) }
+      Send-Json $resp @{ ok = $true; email = $email; changes = $changes; user = (Get-PublicUser $u) }
       return $true
     }
 
     'POST /api/admin/users/delete' {
-      if (-not (Require-Admin $req $resp)) { return $true }
+      if (-not (Assert-Admin $req $resp)) { return $true }
       $body = Read-JsonBody $req
       $email = ("$($body.email)").Trim().ToLower()
       if (-not $db.users.ContainsKey($email)) {
@@ -2231,13 +2233,13 @@ function Process-Admin($req, $resp, $db, $path, $method) {
     }
 
     'GET /api/admin/db' {
-      if (-not (Require-Admin $req $resp)) { return $true }
+      if (-not (Assert-Admin $req $resp)) { return $true }
       Send-Json $resp @{ db = $db }
       return $true
     }
 
     'GET /api/admin/logs' {
-      if (-not (Require-Admin $req $resp)) { return $true }
+      if (-not (Assert-Admin $req $resp)) { return $true }
       $lines = @()
       if (Test-Path $Script:LogPath) {
         try { $lines = Get-Content -Path $Script:LogPath -Tail 200 -ErrorAction SilentlyContinue } catch {}
@@ -2247,7 +2249,7 @@ function Process-Admin($req, $resp, $db, $path, $method) {
     }
 
     'POST /api/admin/users/verify' {
-      if (-not (Require-Admin $req $resp)) { return $true }
+      if (-not (Assert-Admin $req $resp)) { return $true }
       $body = Read-JsonBody $req
       $email = ("$($body.email)").Trim().ToLower()
       if (-not $db.users.ContainsKey($email)) {
@@ -2259,7 +2261,7 @@ function Process-Admin($req, $resp, $db, $path, $method) {
       $u.verifyToken = ''
       $u.verifyTokenExpires = 0
       Save-Db $db
-      Send-Json $resp @{ ok = $true; email = $email; user = (Public-User $u) }
+      Send-Json $resp @{ ok = $true; email = $email; user = (Get-PublicUser $u) }
       return $true
     }
   }
@@ -2268,10 +2270,10 @@ function Process-Admin($req, $resp, $db, $path, $method) {
 
 # ---- Public model gallery: list + slug detail (verification gated) -----
 # These endpoints power the dynamic Players grid on / and /players.html.
-# Anonymous visitors can browse the cards (Public-Model strips PII), but
+# Anonymous visitors can browse the cards (Get-PublicModel strips PII), but
 # the per-model detail view (gallery + full bio) requires the caller to be
 # signed in AND have emailVerified == $true.
-function Process-Models($req, $resp, $db, $path, $method) {
+function Invoke-ModelsHandler($req, $resp, $db, $path, $method) {
   if ("$method $path" -eq 'GET /api/models') {
     $list = @()
     foreach ($email in $db.users.Keys) {
@@ -2279,8 +2281,8 @@ function Process-Models($req, $resp, $db, $path, $method) {
       $acct = ''
       if ($u.accountType) { $acct = [string]$u.accountType }
       if ($acct -ne 'model') { continue }
-      Ensure-Slug $db $u | Out-Null
-      $list += (Public-Model $u)
+      Initialize-Slug $db $u | Out-Null
+      $list += (Get-PublicModel $u)
     }
     $list = @($list | Sort-Object -Property { [long]$_.joined } -Descending)
     Send-Json $resp @{ models = @($list); count = @($list).Count }
@@ -2300,14 +2302,14 @@ function Process-Models($req, $resp, $db, $path, $method) {
       return $true
     }
 
-    $viewer = Require-Auth $req $resp $db
+    $viewer = Assert-Auth $req $resp $db
     if (-not $viewer) { return $true }
     if (-not $viewer.emailVerified) {
       Send-Json $resp @{ error = 'Email verification required.'; reason = 'verify-email' } 403
       return $true
     }
 
-    Send-Json $resp @{ model = (Public-Model-Detail $target) }
+    Send-Json $resp @{ model = (Get-PublicModelDetail $target) }
     return $true
   }
 
@@ -2315,9 +2317,9 @@ function Process-Models($req, $resp, $db, $path, $method) {
 }
 
 # ---- Email verification: start / confirm -------------------------------
-function Process-Verify($req, $resp, $db, $path, $method) {
+function Invoke-VerifyHandler($req, $resp, $db, $path, $method) {
   if ("$method $path" -eq 'POST /api/verify/start') {
-    $u = Require-Auth $req $resp $db
+    $u = Assert-Auth $req $resp $db
     if (-not $u) { return $true }
     if ($u.emailVerified) {
       Send-Json $resp @{ ok = $true; alreadyVerified = $true }
@@ -2385,12 +2387,12 @@ function Process-Verify($req, $resp, $db, $path, $method) {
 }
 
 # ---- Photo uploads (model-only, multipart): main photo + gallery -------
-function Process-Uploads($req, $resp, $db, $path, $method) {
+function Invoke-UploadsHandler($req, $resp, $db, $path, $method) {
   $key = "$method $path"
   switch ($key) {
 
     'POST /api/model/photo' {
-      $u = Require-Model $req $resp $db
+      $u = Assert-Model $req $resp $db
       if (-not $u) { return $true }
       $parts = Read-MultipartParts $req ($Script:UploadMaxBytes + 1048576)
 
@@ -2417,7 +2419,7 @@ function Process-Uploads($req, $resp, $db, $path, $method) {
         return $true
       }
       $ext = $Script:UploadMimeTypes[$photoPart.contentType]
-      $slug = Ensure-Slug $db $u
+      $slug = Initialize-Slug $db $u
       $dir = Get-ModelUploadDir $slug
       # Remove any prior main.* file so the URL keeps a stable name with new ext.
       foreach ($prior in Get-ChildItem -Path $dir -Filter 'main.*' -ErrorAction SilentlyContinue) {
@@ -2427,12 +2429,12 @@ function Process-Uploads($req, $resp, $db, $path, $method) {
       [IO.File]::WriteAllBytes($filePath, $photoPart.bytes)
       $u.photoUrl = '/uploads/models/' + $slug + '/main' + $ext
       Save-Db $db
-      Send-Json $resp @{ ok = $true; photoUrl = $u.photoUrl; user = (Public-User $u) }
+      Send-Json $resp @{ ok = $true; photoUrl = $u.photoUrl; user = (Get-PublicUser $u) }
       return $true
     }
 
     'POST /api/model/gallery/add' {
-      $u = Require-Model $req $resp $db
+      $u = Assert-Model $req $resp $db
       if (-not $u) { return $true }
       if (-not $u.gallery) { $u.gallery = @() }
       if (@($u.gallery).Count -ge $Script:GalleryMax) {
@@ -2461,7 +2463,7 @@ function Process-Uploads($req, $resp, $db, $path, $method) {
         return $true
       }
       $ext = $Script:UploadMimeTypes[$photoPart.contentType]
-      $slug = Ensure-Slug $db $u
+      $slug = Initialize-Slug $db $u
       $dir = Get-ModelUploadDir $slug
       $now = NowMs
       $idx = (@($u.gallery).Count + 1)
@@ -2471,12 +2473,12 @@ function Process-Uploads($req, $resp, $db, $path, $method) {
       $url = '/uploads/models/' + $slug + '/' + $name
       $u.gallery = @($u.gallery) + @{ url = $url; addedAt = $now }
       Save-Db $db
-      Send-Json $resp @{ ok = $true; gallery = @($u.gallery); user = (Public-User $u) }
+      Send-Json $resp @{ ok = $true; gallery = @($u.gallery); user = (Get-PublicUser $u) }
       return $true
     }
 
     'POST /api/model/gallery/remove' {
-      $u = Require-Model $req $resp $db
+      $u = Assert-Model $req $resp $db
       if (-not $u) { return $true }
       $body = Read-JsonBody $req
       $url = ("$($body.url)").Trim()
@@ -2484,7 +2486,7 @@ function Process-Uploads($req, $resp, $db, $path, $method) {
         Send-Json $resp @{ error = 'url is required.' } 400
         return $true
       }
-      $slug = Ensure-Slug $db $u
+      $slug = Initialize-Slug $db $u
       $expectedPrefix = '/uploads/models/' + $slug + '/'
       if (-not $url.StartsWith($expectedPrefix)) {
         Send-Json $resp @{ error = 'You can only remove your own photos.' } 403
@@ -2510,7 +2512,7 @@ function Process-Uploads($req, $resp, $db, $path, $method) {
       $filePath = Join-Path $dir $filename
       try { Remove-Item -Force $filePath -ErrorAction SilentlyContinue } catch {}
       Save-Db $db
-      Send-Json $resp @{ ok = $true; gallery = @($u.gallery); user = (Public-User $u) }
+      Send-Json $resp @{ ok = $true; gallery = @($u.gallery); user = (Get-PublicUser $u) }
       return $true
     }
   }
@@ -2518,7 +2520,7 @@ function Process-Uploads($req, $resp, $db, $path, $method) {
 }
 
 # ---- Tasks: list / claim -----------------------------------------------
-function Process-Tasks($req, $resp, $db, $path, $method) {
+function Invoke-TasksHandler($req, $resp, $db, $path, $method) {
   $key = "$method $path"
   switch ($key) {
 
@@ -2563,7 +2565,7 @@ function Process-Tasks($req, $resp, $db, $path, $method) {
     }
 
     'POST /api/tasks/claim' {
-      $u = Require-Auth $req $resp $db
+      $u = Assert-Auth $req $resp $db
       if (-not $u) { return $true }
       $body = Read-JsonBody $req
       $id = ("$($body.taskId)").Trim()
@@ -2600,7 +2602,7 @@ function Process-Tasks($req, $resp, $db, $path, $method) {
         title    = $task.title
         reward   = [int]$task.reward
         claimedAt = $now
-        user     = (Public-User $u)
+        user     = (Get-PublicUser $u)
       }
       return $true
     }
@@ -2636,7 +2638,7 @@ function Test-FeedbackRate([string]$ip) {
   return $true
 }
 
-function Process-Feedback($req, $resp, $db, $path, $method) {
+function Invoke-FeedbackHandler($req, $resp, $db, $path, $method) {
   $key = "$method $path"
   switch ($key) {
 
@@ -2692,7 +2694,7 @@ function Process-Feedback($req, $resp, $db, $path, $method) {
     }
 
     'GET /api/admin/feedback' {
-      if (-not (Require-Admin $req $resp)) { return $true }
+      if (-not (Assert-Admin $req $resp)) { return $true }
       $list = @()
       if ($db.feedback) { $list = @($db.feedback) }
       $list = @($list | Sort-Object -Property { [long]$_.at } -Descending)
@@ -2701,7 +2703,7 @@ function Process-Feedback($req, $resp, $db, $path, $method) {
     }
 
     'POST /api/admin/feedback/resolve' {
-      if (-not (Require-Admin $req $resp)) { return $true }
+      if (-not (Assert-Admin $req $resp)) { return $true }
       $body = Read-JsonBody $req
       $id = ("$($body.id)").Trim()
       $status = ("$($body.status)").Trim().ToLowerInvariant()
@@ -2729,7 +2731,7 @@ function Process-Feedback($req, $resp, $db, $path, $method) {
 }
 
 # ---- Communicator: presence + 1:1 chat ---------------------------------
-# All endpoints below require auth via Require-Auth (which also refreshes
+# All endpoints below require auth via Assert-Auth (which also refreshes
 # lastSeenMs). Threads keyed by Get-ThreadId so the lookup is deterministic
 # and order-independent.
 function Test-ChatRate([string]$email) {
@@ -2772,7 +2774,7 @@ function Get-OrCreateThread($db, [string]$a, [string]$b) {
 # Returns true if `sender` is allowed to DM `peer` based on the peer's
 # dmPolicy setting. 'open' = anyone, 'mutual' = peer has DM'd me at least
 # once before, 'closed' = no one but the peer themself.
-function Test-DmAllowed($db, $sender, $peer) {
+function Test-DmAllowed($db, $fromUser, $peer) {
   $policy = 'open'
   if ($peer.dmPolicy) {
     $candidate = ([string]$peer.dmPolicy).ToLowerInvariant()
@@ -2782,7 +2784,7 @@ function Test-DmAllowed($db, $sender, $peer) {
   if ($policy -eq 'closed') { return $false }
   # mutual: allow only if there's an existing thread where peer has sent
   # a message to sender (or to anyone in the thread that includes sender).
-  $tid = Get-ThreadId $sender.email $peer.email
+  $tid = Get-ThreadId $fromUser.email $peer.email
   if (-not $db.threads.ContainsKey($tid)) { return $false }
   $thread = $db.threads[$tid]
   if (-not $thread.messages) { return $false }
@@ -2794,7 +2796,7 @@ function Test-DmAllowed($db, $sender, $peer) {
   return $false
 }
 
-function Public-Online($u) {
+function Get-PublicOnlineUser($u) {
   if (-not $u) { return $null }
   $acct = 'supporter'
   if ($u.accountType) { $acct = [string]$u.accountType }
@@ -2802,7 +2804,7 @@ function Public-Online($u) {
   if ($u.slug) { $slug = [string]$u.slug }
   $photo = ''
   if ($u.photoUrl) { $photo = [string]$u.photoUrl }
-  $cam2cam = Default-Cam2Cam $acct
+  $cam2cam = Get-DefaultCam2Cam $acct
   if ($u.PSObject.Properties['cam2cam'] -or ($u -is [hashtable] -and $u.ContainsKey('cam2cam'))) {
     $cam2cam = [bool]$u.cam2cam
   }
@@ -2818,19 +2820,19 @@ function Public-Online($u) {
   }
 }
 
-function Process-Chat($req, $resp, $db, $path, $method) {
+function Invoke-ChatHandler($req, $resp, $db, $path, $method) {
   $key = "$method $path"
   switch ($key) {
 
     'GET /api/online' {
-      $u = Require-Auth $req $resp $db
+      $u = Assert-Auth $req $resp $db
       if (-not $u) { return $true }
       $list = @()
       foreach ($email in $db.users.Keys) {
         $other = $db.users[$email]
         if (([string]$other.email).ToLowerInvariant() -eq ([string]$u.email).ToLowerInvariant()) { continue }
         if (-not (Test-IsOnline $other)) { continue }
-        $list += (Public-Online $other)
+        $list += (Get-PublicOnlineUser $other)
       }
       $list = @($list | Sort-Object -Property { -1 * [long]$_.lastSeenMs })
       if ($list.Count -gt 100) { $list = @($list[0..99]) }
@@ -2839,7 +2841,7 @@ function Process-Chat($req, $resp, $db, $path, $method) {
     }
 
     'GET /api/chat/threads' {
-      $u = Require-Auth $req $resp $db
+      $u = Assert-Auth $req $resp $db
       if (-not $u) { return $true }
       $myEmail = ([string]$u.email).ToLowerInvariant()
       $list = @()
@@ -2897,7 +2899,7 @@ function Process-Chat($req, $resp, $db, $path, $method) {
     }
 
     'GET /api/chat/messages' {
-      $u = Require-Auth $req $resp $db
+      $u = Assert-Auth $req $resp $db
       if (-not $u) { return $true }
       $peerArg = ''
       $sinceArg = 0
@@ -2950,15 +2952,15 @@ function Process-Chat($req, $resp, $db, $path, $method) {
         peerEmail  = [string]$peer.email
         peerName   = [string]$peer.name
         peerOnline = (Test-IsOnline $peer)
-        peerCam2cam = ([bool](Public-Online $peer).cam2cam)
-        myCam2cam  = ([bool](Public-Online $u).cam2cam)
+        peerCam2cam = ([bool](Get-PublicOnlineUser $peer).cam2cam)
+        myCam2cam  = ([bool](Get-PublicOnlineUser $u).cam2cam)
         messages   = @($out)
       }
       return $true
     }
 
     'POST /api/chat/send' {
-      $u = Require-Auth $req $resp $db
+      $u = Assert-Auth $req $resp $db
       if (-not $u) { return $true }
       $body = Read-JsonBody $req
       $peerArg = ("$($body.peer)").Trim().ToLowerInvariant()
@@ -3019,7 +3021,7 @@ function Process-Chat($req, $resp, $db, $path, $method) {
     }
 
     'GET /api/chat/public/messages' {
-      $u = Require-Auth $req $resp $db
+      $u = Assert-Auth $req $resp $db
       if (-not $u) { return $true }
       $sinceArg = 0
       if ($req.Url.Query) {
@@ -3043,7 +3045,7 @@ function Process-Chat($req, $resp, $db, $path, $method) {
     }
 
     'POST /api/chat/public/send' {
-      $u = Require-Auth $req $resp $db
+      $u = Assert-Auth $req $resp $db
       if (-not $u) { return $true }
       $body = Read-JsonBody $req
       $text = ("$($body.text)").Trim()
@@ -3075,7 +3077,7 @@ function Process-Chat($req, $resp, $db, $path, $method) {
     }
 
     'POST /api/chat/policy' {
-      $u = Require-Auth $req $resp $db
+      $u = Assert-Auth $req $resp $db
       if (-not $u) { return $true }
       $body = Read-JsonBody $req
       $policy = ("$($body.policy)").Trim().ToLowerInvariant()
@@ -3085,7 +3087,7 @@ function Process-Chat($req, $resp, $db, $path, $method) {
       }
       $u.dmPolicy = $policy
       Save-Db $db
-      Send-Json $resp @{ ok = $true; dmPolicy = $policy; user = (Public-User $u) }
+      Send-Json $resp @{ ok = $true; dmPolicy = $policy; user = (Get-PublicUser $u) }
       return $true
     }
   }
@@ -3093,7 +3095,7 @@ function Process-Chat($req, $resp, $db, $path, $method) {
 }
 
 # ---- Community: leaderboard --------------------------------------------
-function Process-Community($req, $resp, $db, $path, $method) {
+function Invoke-CommunityHandler($req, $resp, $db, $path, $method) {
   if ("$method $path" -eq 'GET /api/leaderboard') {
     $arr = @()
     foreach ($email in $db.users.Keys) {
@@ -3111,33 +3113,33 @@ function Process-Community($req, $resp, $db, $path, $method) {
 }
 
 # ---- Top-level dispatcher ----------------------------------------------
-function Process-Api($req, $resp, $path, $method) {
+function Invoke-ApiHandler($req, $resp, $path, $method) {
   $db = Get-Db
-  if (Process-Auth      $req $resp $db $path $method) { return }
-  if (Process-Stats     $req $resp $db $path $method) { return }
-  if (Process-Roulette  $req $resp $db $path $method) { return }
-  if (Process-Rewards   $req $resp $db $path $method) { return }
-  if (Process-Economy   $req $resp $db $path $method) { return }
-  if (Process-Cam       $req $resp $db $path $method) { return }
-  if (Process-Tasks     $req $resp $db $path $method) { return }
-  if (Process-Community $req $resp $db $path $method) { return }
+  if (Invoke-AuthHandler      $req $resp $db $path $method) { return }
+  if (Invoke-StatsHandler     $req $resp $db $path $method) { return }
+  if (Invoke-RouletteHandler  $req $resp $db $path $method) { return }
+  if (Invoke-RewardsHandler   $req $resp $db $path $method) { return }
+  if (Invoke-EconomyHandler   $req $resp $db $path $method) { return }
+  if (Invoke-CamHandler       $req $resp $db $path $method) { return }
+  if (Invoke-TasksHandler     $req $resp $db $path $method) { return }
+  if (Invoke-CommunityHandler $req $resp $db $path $method) { return }
   # Always-on Feedback widget (POST is anonymous; admin GET/resolve gated).
-  if (Process-Feedback  $req $resp $db $path $method) { return }
+  if (Invoke-FeedbackHandler  $req $resp $db $path $method) { return }
   # Communicator: presence (/api/online) + 1:1 chat (/api/chat/*).
-  if (Process-Chat      $req $resp $db $path $method) { return }
+  if (Invoke-ChatHandler      $req $resp $db $path $method) { return }
   # Public model gallery + per-model detail (verification gated).
-  if (Process-Models    $req $resp $db $path $method) { return }
+  if (Invoke-ModelsHandler    $req $resp $db $path $method) { return }
   # Email verification: start + confirm.
-  if (Process-Verify    $req $resp $db $path $method) { return }
+  if (Invoke-VerifyHandler    $req $resp $db $path $method) { return }
   # Photo uploads: model main photo + gallery add/remove.
-  if (Process-Uploads   $req $resp $db $path $method) { return }
-  if (Process-Model     $req $resp $db $path $method) { return }
-  if (Process-Admin     $req $resp $db $path $method) { return }
+  if (Invoke-UploadsHandler   $req $resp $db $path $method) { return }
+  if (Invoke-ModelHandler     $req $resp $db $path $method) { return }
+  if (Invoke-AdminHandler     $req $resp $db $path $method) { return }
   Send-Json $resp @{ error = 'Not found.' } 404
 }
 
 # ---------- Dispatcher ----------
-function Process-Request($ctx) {
+function Invoke-RequestHandler($ctx) {
   $req  = $ctx.Request
   $resp = $ctx.Response
   $path = $req.Url.AbsolutePath
@@ -3155,7 +3157,7 @@ function Process-Request($ctx) {
   try {
     if ($path -like '/api/*') {
       [Threading.Monitor]::Enter($Script:DbLock)
-      try { Process-Api $req $resp $path $method }
+      try { Invoke-ApiHandler $req $resp $path $method }
       finally { [Threading.Monitor]::Exit($Script:DbLock) }
     } else {
       $rel = if ($path -eq '/' -or [string]::IsNullOrEmpty($path)) { 'index.html' } else { $path.TrimStart('/') }
@@ -3200,7 +3202,7 @@ Write-Host ""
 try {
   while ($listener.IsListening) {
     $ctx = $listener.GetContext()
-    Process-Request $ctx
+    Invoke-RequestHandler $ctx
   }
 } finally {
   $listener.Stop()
