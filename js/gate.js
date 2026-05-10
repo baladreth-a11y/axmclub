@@ -33,16 +33,28 @@ function render(state) {
 
   const gate = $('#gate');
   if (!gate) return;
-  // After age confirmation, dismiss the gate entirely. Sign-in is
-  // surfaced via the navbar buttons and the verify-banner, not by a
-  // hard wall in front of the page.
-  gate.classList.toggle('hidden', ageOk);
-  if (ageOk) return;
+
+  // If age is confirmed AND user is signed in, hide the gate entirely.
+  if (ageOk && signedIn) {
+    gate.classList.add('hidden');
+    return;
+  }
+
+  // Otherwise, the gate must be visible.
+  gate.classList.remove('hidden');
 
   const ageStage  = gate.querySelector('[data-stage="age"]');
   const authStage = gate.querySelector('[data-stage="auth"]');
-  if (ageStage)  ageStage.classList.remove('hidden');
-  if (authStage) authStage.classList.add('hidden');
+
+  if (!ageOk) {
+    // Stage A: Age verification
+    if (ageStage)  ageStage.classList.remove('hidden');
+    if (authStage) authStage.classList.add('hidden');
+  } else {
+    // Stage B: Auth prompt
+    if (ageStage)  ageStage.classList.add('hidden');
+    if (authStage) authStage.classList.remove('hidden');
+  }
 }
 
 function onAgeConfirm() {

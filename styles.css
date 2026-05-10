@@ -1428,16 +1428,16 @@
 
   /* ---- Gate overlay (blur + sign-in prompt) ---------------------- */
   /* Blur applies only while age has not been confirmed. */
-  body.is-age-gated > :not(.navbar):not(.modal-backdrop):not(.toast):not(#gate) {
+  body.is-age-gated > :not(.navbar):not(.modal-backdrop):not(.toast):not(#gate):not(#feedbackHost) {
     filter: blur(8px);
     transition: filter var(--medium);
   }
-  body:not(.is-age-gated) > :not(.navbar):not(.modal-backdrop):not(.toast):not(#gate) {
+  body:not(.is-age-gated) > :not(.navbar):not(.modal-backdrop):not(.toast):not(#gate):not(#feedbackHost) {
     filter: none;
     transition: filter var(--medium);
   }
   /* Interaction stays locked while signed out, even after unblurring. */
-  body.is-gated > :not(.navbar):not(.modal-backdrop):not(.toast):not(#gate) {
+  body.is-gated > :not(.navbar):not(.modal-backdrop):not(.toast):not(#gate):not(#feedbackHost) {
     pointer-events: none;
     user-select: none;
   }
