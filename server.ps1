@@ -765,40 +765,63 @@ function Read-MultipartParts($req, [long]$maxBytes = 11534336) {
 # harness scrapes the captured stdout for this prefix to extract the
 # token without needing a real SMTP server.
 function Send-VerifyEmail([string]$toEmail, [string]$toName, [string]$token) {
-  $base = $env:AURUM_BASE_URL
-  if (-not $base) { $base = "http://localhost:$($Script:Port)" }
-  $link = $base.TrimEnd('/') + '/api/verify/confirm?token=' + [uri]::EscapeDataString($token)
+  $baseUrl = $env:AURUM_BASE_URL
+  if (-not $baseUrl) { $baseUrl = "http://localhost:$Script:Port" }
+  $link = "$baseUrl/api/verify/confirm?token=$token"
 
   $smtpHost = $env:AURUM_SMTP_HOST
   if (-not $smtpHost) {
-    Write-Host "[verify-link] $toEmail $link" -ForegroundColor Yellow
+    Write-Host "[Verify] SMTP disabled. Link for $toEmail : $link" -ForegroundColor Cyan
+    Write-ServerLog("[Verify] SMTP disabled. Link for $toEmail : $link")
     return
   }
 
-  try {
-    $smtpPort = 587
-    if ($env:AURUM_SMTP_PORT) { $smtpPort = [int]$env:AURUM_SMTP_PORT }
-    $from = $env:AURUM_SMTP_FROM
-    if (-not $from) { $from = 'no-reply@axmclub.com' }
+  # Run in background to avoid blocking the DB lock / request
+  [System.Threading.Tasks.Task]::Run({
+    try {
+      $toEmail = $using:toEmail
+      $toName  = $using:toName
+      $link    = $using:link
+      $smtpHost = $using:smtpHost
 
-    $client = New-Object System.Net.Mail.SmtpClient($smtpHost, $smtpPort)
-    $client.EnableSsl = $true
-    if ($env:AURUM_SMTP_USER -and $env:AURUM_SMTP_PASS) {
-      $client.Credentials = New-Object System.Net.NetworkCredential($env:AURUM_SMTP_USER, $env:AURUM_SMTP_PASS)
+      $smtpPort = [int]($env:AURUM_SMTP_PORT)
+      if ($smtpPort -eq 0) { $smtpPort = 587 }
+      $smtpUser = $env:AURUM_SMTP_USER
+      $smtpPass = $env:AURUM_SMTP_PASS
+      $smtpFrom = $env:AURUM_SMTP_FROM
+      if (-not $smtpFrom) { $smtpFrom = 'noreply@axmclub.com' }
+
+      $msg = New-Object Net.Mail.MailMessage
+      $msg.From = $smtpFrom
+      $msg.To.Add($toEmail)
+      $msg.Subject = "Verify your AxMclub.com account"
+      $msg.IsBodyHtml = $true
+      $msg.Body = @"
+<html>
+<body style="font-family:sans-serif; line-height:1.5; color:#333;">
+  <h2>Welcome to AxMclub</h2>
+  <p>Hello $toName,</p>
+  <p>Please click the link below to verify your email address and unlock full access to the club:</p>
+  <p><a href="$link" style="display:inline-block; padding:10px 20px; background:#d4af6a; color:#fff; text-decoration:none; border-radius:4px;">Verify Email</a></p>
+  <p>Or copy and paste this URL:<br>$link</p>
+  <hr>
+  <p style="font-size:12px; color:#999;">If you didn't sign up for AxMclub.com, you can ignore this email.</p>
+</body>
+</html>
+"@
+      $client = New-Object Net.Mail.SmtpClient($smtpHost, $smtpPort)
+      $client.EnableSsl = $true
+      $client.Timeout = 10000 # 10s timeout
+      if ($smtpUser -and $smtpPass) {
+        $client.Credentials = New-Object Net.NetworkCredential($smtpUser, $smtpPass)
+      }
+      $client.Send($msg)
+      Write-Host "[Verify] Email sent to $toEmail" -ForegroundColor Green
+    } catch {
+      Write-Host "WARN: failed to send verify email to ${using:toEmail}: $_" -ForegroundColor Yellow
+      Write-ServerLog("WARN: failed to send verify email to ${using:toEmail}: $_")
     }
-
-    $msg = New-Object System.Net.Mail.MailMessage
-    $msg.From = New-Object System.Net.Mail.MailAddress($from, 'AxMclub')
-    $msg.To.Add((New-Object System.Net.Mail.MailAddress($toEmail, $toName)))
-    $msg.Subject = 'Verify your AxMclub email'
-    $msg.Body    = "Hi $toName,`r`n`r`nConfirm your email to view model profiles on AxMclub:`r`n$link`r`n`r`nThe link expires in 24 hours."
-    $msg.IsBodyHtml = $false
-    $client.Send($msg)
-    $msg.Dispose(); $client.Dispose()
-  } catch {
-    Write-Host "WARN: failed to send verify email to ${toEmail}: $_" -ForegroundColor Yellow
-    Write-Host "[verify-link] $toEmail $link" -ForegroundColor Yellow
-  }
+  })
 }
 
 function Get-SessionUser($req, $db) {
@@ -910,6 +933,7 @@ function Process-Auth($req, $resp, $db, $path, $method) {
         $body = Read-JsonBody $req
         if (-not $body -or $body.Count -eq 0) {
           Write-Host "[Register] Failed to parse request body"
+          Write-ServerLog("[Register] Failed to parse request body")
           Send-Json $resp @{ error = 'Invalid request body.' } 400
           return $true
         }
@@ -971,6 +995,7 @@ function Process-Auth($req, $resp, $db, $path, $method) {
         # Save database with error handling
         if (-not (Save-Db $db)) {
           Write-Host "[Register] Database save failed for email: $email"
+          Write-ServerLog("[Register] Database save failed for email: $email")
           Send-Json $resp @{ error = 'Failed to create account. Please try again.' } 500
           return $true
         }
@@ -979,8 +1004,9 @@ function Process-Auth($req, $resp, $db, $path, $method) {
         Send-Json $resp @{ user = (Public-User $db.users[$email]) } 200 @((Session-Cookie $sid))
         return $true
       } catch {
-        Write-Error "[Register] Unhandled exception: $_"
-        Send-Json $resp @{ error = 'Registration failed. Please try again.' } 500
+        Write-Host "[Register] Error: $_"
+        Write-ServerLog("[Register] Error: $_")
+        Send-Json $resp @{ error = 'Server error during registration.' } 500
         return $true
       }
     }
