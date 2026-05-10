@@ -29,6 +29,14 @@ $ProgressPreference    = 'SilentlyContinue'
 function Step([string]$msg) { Write-Host ''; Write-Host ("==> " + $msg) -ForegroundColor Cyan }
 function Info([string]$msg) { Write-Host ("    " + $msg) -ForegroundColor Gray }
 function Ok  ([string]$msg) { Write-Host ("    " + $msg) -ForegroundColor Green }
+function Show-LogTail([string]$path) {
+    if (Test-Path $path) {
+        Info ("Last lines from " + $path + ":")
+        Get-Content -LiteralPath $path -Tail 40 | ForEach-Object { Write-Host ("      " + $_) -ForegroundColor DarkGray }
+    } else {
+        Info ("Log not found: " + $path)
+    }
+}
 
 function Assert-Admin {
     $p = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
@@ -71,9 +79,16 @@ if (-not $svc) {
     throw "Service '$ServiceName' is not installed. Re-run deploy\install-service.ps1."
 }
 Restart-Service -Name $ServiceName -Force
-Start-Sleep -Seconds 2
-$status = (Get-Service -Name $ServiceName).Status
+$status = $null
+for ($i = 0; $i -lt 30; $i++) {
+    Start-Sleep -Seconds 1
+    $status = (Get-Service -Name $ServiceName).Status
+    if ($status -eq 'Running') { break }
+    Info ("Waiting for service '$ServiceName'... status=" + $status)
+}
 if ($status -ne 'Running') {
+    Show-LogTail (Join-Path $InstallPath 'logs\server.err.log')
+    Show-LogTail (Join-Path $InstallPath 'logs\server.out.log')
     throw "Service '$ServiceName' did not reach Running state (status=$status). Check $InstallPath\logs\server.err.log"
 }
 Ok ("Service '$ServiceName' is " + $status + ".")
