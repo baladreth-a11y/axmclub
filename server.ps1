@@ -637,7 +637,9 @@ function Send-Json($resp, $obj, [int]$status = 200, $cookies = @()) {
   $json = $obj | ConvertTo-Json -Depth 20 -Compress
   $bytes = [Text.Encoding]::UTF8.GetBytes($json)
   $resp.ContentLength64 = $bytes.Length
-  $resp.OutputStream.Write($bytes, 0, $bytes.Length)
+  if ($Script:CurrentMethod -ne 'HEAD') {
+    $resp.OutputStream.Write($bytes, 0, $bytes.Length)
+  }
   $resp.OutputStream.Close()
 }
 
@@ -683,7 +685,9 @@ function Send-Static($resp, $fullPath) {
   $resp.ContentLength64 = $bytes.Length
   $resp.Headers.Add('Cache-Control', $cacheControl)
   $resp.Headers.Add('X-Content-Type-Options', 'nosniff')
-  $resp.OutputStream.Write($bytes, 0, $bytes.Length)
+  if ($Script:CurrentMethod -ne 'HEAD') {
+    $resp.OutputStream.Write($bytes, 0, $bytes.Length)
+  }
   $resp.OutputStream.Close()
 }
 
@@ -694,7 +698,9 @@ function Send-Html($resp, [string]$html, [int]$status = 200) {
   $resp.ContentType = 'text/html; charset=utf-8'
   $bytes = [Text.Encoding]::UTF8.GetBytes($html)
   $resp.ContentLength64 = $bytes.Length
-  $resp.OutputStream.Write($bytes, 0, $bytes.Length)
+  if ($Script:CurrentMethod -ne 'HEAD') {
+    $resp.OutputStream.Write($bytes, 0, $bytes.Length)
+  }
   $resp.OutputStream.Close()
 }
 
@@ -3095,6 +3101,7 @@ function Process-Request($ctx) {
   $resp = $ctx.Response
   $path = $req.Url.AbsolutePath
   $method = $req.HttpMethod.ToUpper()
+  $Script:CurrentMethod = $method
 
   $origin = $req.Headers['Origin']; if (-not $origin) { $origin = '*' }
   $resp.Headers.Add('Access-Control-Allow-Origin',  $origin)

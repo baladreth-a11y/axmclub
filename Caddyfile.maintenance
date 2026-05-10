@@ -73,7 +73,7 @@ axmcamclub.com, www.axmcamclub.com {
     }
 
     log {
-        output file C:\Caddy\logs\axmclub.log {
+        output file ./logs/axmclub.log {
             roll_size 10MiB
             roll_keep  7
         }
