@@ -285,9 +285,7 @@ function New-Salt {
   return [Convert]::ToBase64String($bytes)
 }
 
-function Get-PasswordHash {
-  [Diagnostics.CodeAnalysis.SuppressMessageAttribute("PSAvoidUsingPlainTextForPassword", "")]
-  param($password, $salt)
+function Get-PasswordHash($password, $salt) {
   # Use PBKDF2 (Rfc2898) with SHA256 and strong iteration count
   $iterations = 100000
   try {
@@ -3114,67 +3112,71 @@ function Invoke-CommunityHandler($req, $resp, $db, $path, $method) {
 
 # ---- Top-level dispatcher ----------------------------------------------
 function Invoke-ApiHandler($req, $resp, $path, $method) {
-  $db = Get-Db
-  if (Invoke-AuthHandler      $req $resp $db $path $method) { return }
-  if (Invoke-StatsHandler     $req $resp $db $path $method) { return }
-  if (Invoke-RouletteHandler  $req $resp $db $path $method) { return }
-  if (Invoke-RewardsHandler   $req $resp $db $path $method) { return }
-  if (Invoke-EconomyHandler   $req $resp $db $path $method) { return }
-  if (Invoke-CamHandler       $req $resp $db $path $method) { return }
-  if (Invoke-TasksHandler     $req $resp $db $path $method) { return }
-  if (Invoke-CommunityHandler $req $resp $db $path $method) { return }
-  # Always-on Feedback widget (POST is anonymous; admin GET/resolve gated).
-  if (Invoke-FeedbackHandler  $req $resp $db $path $method) { return }
-  # Communicator: presence (/api/online) + 1:1 chat (/api/chat/*).
-  if (Invoke-ChatHandler      $req $resp $db $path $method) { return }
-  # Public model gallery + per-model detail (verification gated).
-  if (Invoke-ModelsHandler    $req $resp $db $path $method) { return }
-  # Email verification: start + confirm.
-  if (Invoke-VerifyHandler    $req $resp $db $path $method) { return }
-  # Photo uploads: model main photo + gallery add/remove.
-  if (Invoke-UploadsHandler   $req $resp $db $path $method) { return }
-  if (Invoke-ModelHandler     $req $resp $db $path $method) { return }
-  if (Invoke-AdminHandler     $req $resp $db $path $method) { return }
-  Send-Json $resp @{ error = 'Not found.' } 404
+    $db = Get-Db
+    if (Invoke-AuthHandler      $req $resp $db $path $method) { return }
+    if (Invoke-StatsHandler     $req $resp $db $path $method) { return }
+    if (Invoke-RouletteHandler  $req $resp $db $path $method) { return }
+    if (Invoke-RewardsHandler   $req $resp $db $path $method) { return }
+    if (Invoke-EconomyHandler   $req $resp $db $path $method) { return }
+    if (Invoke-CamHandler       $req $resp $db $path $method) { return }
+    if (Invoke-TasksHandler     $req $resp $db $path $method) { return }
+    if (Invoke-CommunityHandler $req $resp $db $path $method) { return }
+    # Always-on Feedback widget (POST is anonymous; admin GET/resolve gated).
+    if (Invoke-FeedbackHandler  $req $resp $db $path $method) { return }
+    # Communicator: presence (/api/online) + 1:1 chat (/api/chat/*).
+    if (Invoke-ChatHandler      $req $resp $db $path $method) { return }
+    # Public model gallery + per-model detail (verification gated).
+    if (Invoke-ModelsHandler    $req $resp $db $path $method) { return }
+    # Email verification: start + confirm.
+    if (Invoke-VerifyHandler    $req $resp $db $path $method) { return }
+    # Photo uploads: model main photo + gallery add/remove.
+    if (Invoke-UploadsHandler   $req $resp $db $path $method) { return }
+    if (Invoke-ModelHandler     $req $resp $db $path $method) { return }
+    if (Invoke-AdminHandler     $req $resp $db $path $method) { return }
+    Send-Json $resp @{ error = 'Not found.' } 404
 }
 
 # ---------- Dispatcher ----------
 function Invoke-RequestHandler($ctx) {
-  $req  = $ctx.Request
-  $resp = $ctx.Response
-  $path = $req.Url.AbsolutePath
-  $method = $req.HttpMethod.ToUpper()
-  $Script:CurrentMethod = $method
+    $req  = $ctx.Request
+    $resp = $ctx.Response
+    $path = $req.Url.AbsolutePath
+    $method = $req.HttpMethod.ToUpper()
+    $Script:CurrentMethod = $method
 
-  $origin = $req.Headers['Origin']; if (-not $origin) { $origin = '*' }
-  $resp.Headers.Add('Access-Control-Allow-Origin',  $origin)
-  $resp.Headers.Add('Access-Control-Allow-Credentials', 'true')
-  $resp.Headers.Add('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-  $resp.Headers.Add('Access-Control-Allow-Headers', 'Content-Type')
+    $origin = $req.Headers['Origin']; if (-not $origin) { $origin = '*' }
+    $resp.Headers.Add('Access-Control-Allow-Origin',  $origin)
+    $resp.Headers.Add('Access-Control-Allow-Credentials', 'true')
+    $resp.Headers.Add('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+    $resp.Headers.Add('Access-Control-Allow-Headers', 'Content-Type')
 
-  if ($method -eq 'OPTIONS') { $resp.StatusCode = 204; $resp.Close(); return }
+    if ($method -eq 'OPTIONS') { $resp.StatusCode = 204; $resp.Close(); return }
 
-  try {
-    if ($path -like '/api/*') {
-      [Threading.Monitor]::Enter($Script:DbLock)
-      try { Invoke-ApiHandler $req $resp $path $method }
-      finally { [Threading.Monitor]::Exit($Script:DbLock) }
-    } else {
-      $rel = if ($path -eq '/' -or [string]::IsNullOrEmpty($path)) { 'index.html' } else { $path.TrimStart('/') }
-      $full = [IO.Path]::GetFullPath((Join-Path $Root $rel))
-      if (-not $full.StartsWith([IO.Path]::GetFullPath($Root))) {
-        $resp.StatusCode = 403; $resp.Close(); return
-      }
-      if ($full -ieq [IO.Path]::GetFullPath($DbPath)) {
-        $resp.StatusCode = 403; $resp.Close(); return
-      }
-      Send-Static $resp $full
+    try {
+        if ($path -like '/api/*') {
+            [Threading.Monitor]::Enter($Script:DbLock)
+            try {
+                Invoke-ApiHandler $req $resp $path $method
+            }
+            finally {
+                [Threading.Monitor]::Exit($Script:DbLock)
+            }
+        } else {
+            $rel = if ($path -eq '/' -or [string]::IsNullOrEmpty($path)) { 'index.html' } else { $path.TrimStart('/') }
+            $full = [IO.Path]::GetFullPath((Join-Path $Root $rel))
+            if (-not $full.StartsWith([IO.Path]::GetFullPath($Root))) {
+                $resp.StatusCode = 403; $resp.Close(); return
+            }
+            if ($full -ieq [IO.Path]::GetFullPath($DbPath)) {
+                $resp.StatusCode = 403; $resp.Close(); return
+            }
+            Send-Static $resp $full
+        }
+    } catch {
+        Write-Host "ERROR handling $method $path :: $_" -ForegroundColor Red
+        Write-ServerLog("ERROR handling $method $path :: $_")
+        try { Send-Json $resp @{ error = $_.ToString() } 500 } catch {}
     }
-  } catch {
-    Write-Host "ERROR handling $method $path :: $_" -ForegroundColor Red
-    Write-ServerLog("ERROR handling $method $path :: $_")
-    try { Send-Json $resp @{ error = $_.ToString() } 500 } catch {}
-  }
 }
 
 # ---------- Start listener ----------
@@ -3185,11 +3187,12 @@ function Invoke-RequestHandler($ctx) {
 $listener = New-Object System.Net.HttpListener
 $prefixes = @("http://localhost:$Port/", "http://127.0.0.1:$Port/")
 foreach ($p in $prefixes) { $listener.Prefixes.Add($p) }
-try { $listener.Start() }
-catch {
-  Write-Host ("Could not bind to: " + ($prefixes -join ', ')) -ForegroundColor Red
-  Write-Host "Try a different port:  powershell -File .\server.ps1 -Port 8080" -ForegroundColor Yellow
-  throw
+try {
+    $listener.Start()
+} catch {
+    Write-Host ("Could not bind to: " + ($prefixes -join ', ')) -ForegroundColor Red
+    Write-Host "Try a different port:  powershell -File .\server.ps1 -Port 8080" -ForegroundColor Yellow
+    throw
 }
 
 Write-Host ""
@@ -3200,11 +3203,14 @@ Write-Host "  Press Ctrl+C to stop."
 Write-Host ""
 
 try {
-  while ($listener.IsListening) {
-    $ctx = $listener.GetContext()
-    Invoke-RequestHandler $ctx
-  }
+    while ($listener.IsListening) {
+        $ctx = $listener.GetContext()
+        Invoke-RequestHandler $ctx
+    }
 } finally {
-  $listener.Stop()
-  $listener.Close()
+    if ($null -ne $listener) {
+        $listener.Stop()
+        $listener.Close()
+    }
 }
+
