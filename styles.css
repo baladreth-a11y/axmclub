@@ -511,6 +511,51 @@
   }
   .fine-print { font-size: 12px; color: var(--muted); margin-top: var(--space-2); }
 
+  /* ---- Latest updates strip ---------------------------------------- */
+  .latest-updates {
+    padding: var(--space-5) 0 0;
+    border-top: 1px solid var(--line);
+    background: linear-gradient(180deg, rgba(255,255,255,0.018), transparent);
+  }
+  .latest-updates-inner {
+    display: grid;
+    grid-template-columns: minmax(190px, 0.55fr) minmax(0, 1.45fr);
+    gap: var(--space-5);
+    align-items: start;
+  }
+  .latest-updates-head h2 {
+    margin: var(--space-1) 0 0;
+    font-size: 24px;
+  }
+  .latest-update-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--space-3);
+  }
+  .latest-update-list li {
+    min-height: 112px;
+    padding: var(--space-4);
+    background: var(--surface-1);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+  .latest-update-list strong {
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.35;
+  }
+  .latest-update-list span {
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.45;
+  }
+
   /* ---- Top strip (event + stats widget) ---------------------------- */
   .top-strip { padding: var(--space-6) 0 0; }
   .top-strip-inner {
@@ -1660,6 +1705,9 @@
     .catalog-grid   { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .tasks-grid     { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .players-grid   { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .latest-updates-inner { grid-template-columns: 1fr; }
+    .latest-update-list { grid-template-columns: 1fr; }
+    .latest-update-list li { min-height: 0; }
     .top-strip-inner { grid-template-columns: 1fr; }
     .token-packs    { grid-template-columns: 1fr; }
   }
