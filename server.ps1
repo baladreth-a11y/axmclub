@@ -764,8 +764,13 @@ function Read-MultipartParts($req, [long]$maxBytes = 11534336) {
 # writing the link to stdout with a [verify-link] prefix. The e2e test
 # harness scrapes the captured stdout for this prefix to extract the
 # token without needing a real SMTP server.
-function Send-VerifyEmail([string]$toEmail, [string]$toName, [string]$token) {
+function Send-VerifyEmail([string]$toEmail, [string]$toName, [string]$token, [string]$requestHost = '') {
   $baseUrl = $env:AURUM_BASE_URL
+  if (-not $baseUrl -and $requestHost) {
+    # Inferred from request Host header (e.g. axmcamclub.com)
+    $protocol = if ($requestHost -match 'localhost|127\.0\.0\.1') { 'http' } else { 'https' }
+    $baseUrl = "${protocol}://$requestHost"
+  }
   if (-not $baseUrl) { $baseUrl = "http://localhost:$Script:Port" }
   $link = "$baseUrl/api/verify/confirm?token=$token"
 
@@ -789,7 +794,10 @@ function Send-VerifyEmail([string]$toEmail, [string]$toName, [string]$token) {
       $smtpUser = $env:AURUM_SMTP_USER
       $smtpPass = $env:AURUM_SMTP_PASS
       $smtpFrom = $env:AURUM_SMTP_FROM
-      if (-not $smtpFrom) { $smtpFrom = 'noreply@axmclub.com' }
+      if (-not $smtpFrom) {
+        if ($smtpUser -match '@') { $smtpFrom = $smtpUser }
+        else { $smtpFrom = 'noreply@axmclub.com' }
+      }
 
       $msg = New-Object Net.Mail.MailMessage
       $msg.From = $smtpFrom
@@ -816,7 +824,8 @@ function Send-VerifyEmail([string]$toEmail, [string]$toName, [string]$token) {
         $client.Credentials = New-Object Net.NetworkCredential($smtpUser, $smtpPass)
       }
       $client.Send($msg)
-      Write-Host "[Verify] Email sent to $toEmail" -ForegroundColor Green
+      Write-Host "[Verify] Email sent to $toEmail (via $smtpHost)" -ForegroundColor Green
+      Write-ServerLog("[Verify] Email sent to $toEmail (via $smtpHost)")
     } catch {
       Write-Host "WARN: failed to send verify email to ${using:toEmail}: $_" -ForegroundColor Yellow
       Write-ServerLog("WARN: failed to send verify email to ${using:toEmail}: $_")
@@ -992,6 +1001,11 @@ function Process-Auth($req, $resp, $db, $path, $method) {
         $sid = New-Token
         $db.sessions[$sid] = $email
 
+        # Auto-start email verification
+        $verifyToken = New-Token
+        $db.users[$email].verifyToken = $verifyToken
+        $db.users[$email].verifyTokenExpires = (NowMs) + $Script:VerifyTtlMs
+
         # Save database with error handling
         if (-not (Save-Db $db)) {
           Write-Host "[Register] Database save failed for email: $email"
@@ -1001,6 +1015,7 @@ function Process-Auth($req, $resp, $db, $path, $method) {
         }
 
         Write-Host "[Register] Success: $email registered as $accountType"
+        Send-VerifyEmail $email $name $verifyToken $req.Headers['Host']
         Send-Json $resp @{ user = (Public-User $db.users[$email]) } 200 @((Session-Cookie $sid))
         return $true
       } catch {
@@ -2312,7 +2327,7 @@ function Process-Verify($req, $resp, $db, $path, $method) {
     $u.verifyToken = $token
     $u.verifyTokenExpires = (NowMs) + $Script:VerifyTtlMs
     Save-Db $db
-    Send-VerifyEmail $u.email $u.name $token
+    Send-VerifyEmail $u.email $u.name $token $req.Headers['Host']
     Send-Json $resp @{ ok = $true; sent = $true }
     return $true
   }
