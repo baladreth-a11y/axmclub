@@ -781,30 +781,25 @@ function Send-VerifyEmail([string]$toEmail, [string]$toName, [string]$token, [st
     return
   }
 
-  # Run in background to avoid blocking the DB lock / request
-  [System.Threading.Tasks.Task]::Run({
-    try {
-      $toEmail = $using:toEmail
-      $toName  = $using:toName
-      $link    = $using:link
-      $smtpHost = $using:smtpHost
+  # Run synchronously for now to ensure reliability and correct engine state.
+  # If SMTP becomes a bottleneck, we can move this to a RunspacePool.
+  try {
+    $smtpPort = [int]($env:AURUM_SMTP_PORT)
+    if ($smtpPort -eq 0) { $smtpPort = 587 }
+    $smtpUser = $env:AURUM_SMTP_USER
+    $smtpPass = $env:AURUM_SMTP_PASS
+    $smtpFrom = $env:AURUM_SMTP_FROM
+    if (-not $smtpFrom) {
+      if ($smtpUser -match '@') { $smtpFrom = $smtpUser }
+      else { $smtpFrom = 'noreply@axmclub.com' }
+    }
 
-      $smtpPort = [int]($env:AURUM_SMTP_PORT)
-      if ($smtpPort -eq 0) { $smtpPort = 587 }
-      $smtpUser = $env:AURUM_SMTP_USER
-      $smtpPass = $env:AURUM_SMTP_PASS
-      $smtpFrom = $env:AURUM_SMTP_FROM
-      if (-not $smtpFrom) {
-        if ($smtpUser -match '@') { $smtpFrom = $smtpUser }
-        else { $smtpFrom = 'noreply@axmclub.com' }
-      }
-
-      $msg = New-Object Net.Mail.MailMessage
-      $msg.From = $smtpFrom
-      $msg.To.Add($toEmail)
-      $msg.Subject = "Verify your AxMclub.com account"
-      $msg.IsBodyHtml = $true
-      $msg.Body = @"
+    $msg = New-Object Net.Mail.MailMessage
+    $msg.From = $smtpFrom
+    $msg.To.Add($toEmail)
+    $msg.Subject = "Verify your AxMclub.com account"
+    $msg.IsBodyHtml = $true
+    $msg.Body = @"
 <html>
 <body style="font-family:sans-serif; line-height:1.5; color:#333;">
   <h2>Welcome to AxMclub</h2>
@@ -817,20 +812,19 @@ function Send-VerifyEmail([string]$toEmail, [string]$toName, [string]$token, [st
 </body>
 </html>
 "@
-      $client = New-Object Net.Mail.SmtpClient($smtpHost, $smtpPort)
-      $client.EnableSsl = $true
-      $client.Timeout = 10000 # 10s timeout
-      if ($smtpUser -and $smtpPass) {
-        $client.Credentials = New-Object Net.NetworkCredential($smtpUser, $smtpPass)
-      }
-      $client.Send($msg)
-      Write-Host "[Verify] Email sent to $toEmail (via $smtpHost)" -ForegroundColor Green
-      Write-ServerLog("[Verify] Email sent to $toEmail (via $smtpHost)")
-    } catch {
-      Write-Host "WARN: failed to send verify email to ${using:toEmail}: $_" -ForegroundColor Yellow
-      Write-ServerLog("WARN: failed to send verify email to ${using:toEmail}: $_")
+    $client = New-Object Net.Mail.SmtpClient($smtpHost, $smtpPort)
+    $client.EnableSsl = $true
+    $client.Timeout = 10000 # 10s timeout
+    if ($smtpUser -and $smtpPass) {
+      $client.Credentials = New-Object Net.NetworkCredential($smtpUser, $smtpPass)
     }
-  })
+    $client.Send($msg)
+    Write-Host "[Verify] Email sent to $toEmail (via $smtpHost)" -ForegroundColor Green
+    Write-ServerLog("[Verify] Email sent to $toEmail (via $smtpHost)")
+  } catch {
+    Write-Host "WARN: failed to send verify email to $toEmail: $_" -ForegroundColor Yellow
+    Write-ServerLog("WARN: failed to send verify email to $toEmail: $_")
+  }
 }
 
 function Get-SessionUser($req, $db) {
