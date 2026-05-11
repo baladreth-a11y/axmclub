@@ -161,8 +161,37 @@ if (-not (Test-Path $DataDir))    { New-Item -ItemType Directory $DataDir    | O
 if (-not (Test-Path $UploadsDir)) { New-Item -ItemType Directory $UploadsDir | Out-Null }
 
 $Script:DbLock = New-Object object
-# Make $Port reachable from helpers like Send-VerifyEmail without
-# requiring it to be passed around. Set after the param block runs.
+# Load DB into memory once at startup for performance.
+# We only write to disk on modification, never read on request.
+function Get-Db {
+  if (-not (Test-Path $DbPath)) {
+    return @{
+      users    = @{}
+      sessions = @{}
+      stats    = @{ members = 0; spins = 0 }
+      results  = @()
+      feedback = @()
+      threads  = @{}
+    }
+  }
+  try {
+    $raw = Get-Content $DbPath -Raw -Encoding UTF8
+    if (-not $raw) { return @{ users=@{}; sessions=@{}; stats=@{members=0;spins=0}; results=@() } }
+    $obj = $raw | ConvertFrom-Json
+    $h = ConvertTo-Hashtable $obj
+    if (-not $h.users)    { $h.users    = @{} }
+    if (-not $h.sessions) { $h.sessions = @{} }
+    if (-not $h.stats)    { $h.stats    = @{ members = 0; spins = 0 } }
+    if (-not $h.results)  { $h.results  = @() }
+    if (-not $h.feedback) { $h.feedback = @() }
+    return $h
+  } catch {
+    Write-Host "CRITICAL: Failed to load DB: $_" -ForegroundColor Red
+    return @{ users=@{}; sessions=@{}; stats=@{members=0;spins=0}; results=@() }
+  }
+}
+
+$Script:Db = Get-Db
 $Script:Port = $Port
 
 function Write-ServerLog([string]$msg) {
@@ -237,44 +266,20 @@ function ConvertTo-Hashtable {
   return $obj
 }
 
-function Get-Db {
-  if (-not (Test-Path $DbPath)) {
-    return @{
-      users    = @{}
-      sessions = @{}
-      stats    = @{ members = 0; spins = 0 }
-      results  = @()
-      feedback = @()
-      threads  = @{}
-    }
-  }
-  try {
-    $raw = Get-Content $DbPath -Raw -Encoding UTF8
-    if (-not $raw) { return @{ users=@{}; sessions=@{}; stats=@{members=0;spins=0}; results=@() } }
-    $obj = $raw | ConvertFrom-Json
-    $h = ConvertTo-Hashtable $obj
-    if (-not $h.users)    { $h.users    = @{} }
-    if (-not $h.sessions) { $h.sessions = @{} }
-    if (-not $h.stats)    { $h.stats    = @{ members = 0; spins = 0 } }
-    if (-not $h.results)  { $h.results  = @() }
-    if (-not $h.feedback) { $h.feedback = @() }
-    if (-not $h.threads)  { $h.threads  = @{} }
-    return $h
-  } catch {
-    Write-Host "WARN: Could not read db.json, starting fresh. ($_)" -ForegroundColor Yellow
-    return @{ users=@{}; sessions=@{}; stats=@{members=0;spins=0}; results=@(); feedback=@(); threads=@{} }
-  }
-}
+
 
 function Save-Db($db) {
   try {
+    $Script:Db = $db
     $json = $db | ConvertTo-Json -Depth 20
     $tmp = "$DbPath.tmp"
-    [IO.File]::WriteAllText($tmp, $json, [Text.UTF8Encoding]::new($false))
-    Move-Item -Force $tmp $DbPath
+    [System.IO.File]::WriteAllText($tmp, $json, [System.Text.Encoding]::UTF8)
+    if (Test-Path $tmp) {
+        Move-Item -Force $tmp $DbPath
+    }
     return $true
   } catch {
-    Write-Error "[Save-Db] Failed to save database: $_"
+    Write-Host "CRITICAL: Database SAVE FAILED: $_" -ForegroundColor Red
     return $false
   }
 }
@@ -3106,7 +3111,7 @@ function Invoke-CommunityHandler($req, $resp, $db, $path, $method) {
 
 # ---- Top-level dispatcher ----------------------------------------------
 function Invoke-ApiHandler($req, $resp, $path, $method) {
-    $db = Get-Db
+    $db = $Script:Db
     if (Invoke-AuthHandler      $req $resp $db $path $method) { return }
     if (Invoke-StatsHandler     $req $resp $db $path $method) { return }
     if (Invoke-RouletteHandler  $req $resp $db $path $method) { return }
