@@ -822,8 +822,8 @@ function Send-VerifyEmail([string]$toEmail, [string]$toName, [string]$token, [st
     Write-Host "[Verify] Email sent to $toEmail (via $smtpHost)" -ForegroundColor Green
     Write-ServerLog("[Verify] Email sent to $toEmail (via $smtpHost)")
   } catch {
-    Write-Host "WARN: failed to send verify email to $toEmail: $_" -ForegroundColor Yellow
-    Write-ServerLog("WARN: failed to send verify email to $toEmail: $_")
+    Write-Host "WARN: failed to send verify email to $toEmail : $_" -ForegroundColor Yellow
+    Write-ServerLog("WARN: failed to send verify email to $toEmail : $_")
   }
 }
 
