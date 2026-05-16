@@ -1,7 +1,7 @@
 import { $ } from './util.js';
 import { api } from './api.js';
 import { store } from './store.js';
-import { toast } from './ui.js';
+import { toast , reportError} from './ui.js';
 import { openModal, closeModal, registerView } from './modal.js';
 
 let pendingSource = 'welcome';
@@ -49,7 +49,7 @@ async function resendVerification() {
     const res = await api.verifyStart();
     toast(res.alreadyVerified ? 'Your email is already verified.' : 'Verification email sent. Check your inbox.', 'success');
   } catch (err) {
-    toast(err.message, 'error');
+    reportError(err);
   } finally {
     if (btn) {
       btn.disabled = false;

@@ -8,7 +8,7 @@
 import { $ } from './util.js';
 import { api } from './api.js';
 import { store } from './store.js';
-import { toast } from './ui.js';
+import { toast , reportError} from './ui.js';
 import { openModal } from './modal.js';
 import {
   startCall, openCallerOnAccept, acceptCall, declineCall, endCall,
@@ -135,7 +135,7 @@ async function onPasswordSubmit(e) {
     toast(`Pass unlocked — ${res.note || 'enjoy the stream'}.`, 'success');
   } catch (err) {
     if (err.status === 401) { openModal('login'); toast('Sign in first.'); return; }
-    toast(err.message, 'error');
+    reportError(err);
   }
 }
 
@@ -217,7 +217,7 @@ async function fetchInbox() {
           showState('liveCall');
           updateCallStatusLabel('Connecting\u2026');
         } catch (err) {
-          toast(err.message || 'Could not start cam2cam.', 'error');
+          reportError(err, 'Could not start cam2cam.');
         }
       } else if (c.status === 'declined' && c.role === 'caller') {
         toast(`${c.toName || c.to} declined the cam2cam request.`);
@@ -281,7 +281,7 @@ async function onIncomingAccept() {
   try {
     await acceptCall(id, peer, name);
   } catch (err) {
-    toast(err.message || 'Could not accept call.', 'error');
+    reportError(err, 'Could not accept call.');
     showState('locked');
   }
 }
@@ -352,7 +352,7 @@ async function onC2cToggle(e) {
     fetchOnline();
   } catch (err) {
     e.target.checked = !enabled;
-    toast(err.message || 'Could not update cam2cam.', 'error');
+    reportError(err, 'Could not update cam2cam.');
   }
 }
 
@@ -388,7 +388,7 @@ async function onCallButton(e) {
       toast(`${name} hasn\u2019t enabled cam2cam yet.`, 'info');
       return;
     }
-    toast(err.message || 'Could not send request.', 'error');
+    reportError(err, 'Could not send request.');
   }
 }
 
@@ -409,6 +409,8 @@ async function onEnd() {
 
 // --- Wiring ---------------------------------------------------------------
 export function initCamroom() {
+  if (!$('#camroom') && !$('#camLocked')) return;
+
   // Legacy pass form.
   const pwForm = $('#camPasswordForm');
   if (pwForm) pwForm.addEventListener('submit', onPasswordSubmit);

@@ -3,7 +3,7 @@
 // a bug report or idea without signing in. Submissions are stored in
 // db.feedback by the backend and surfaced in the admin panel.
 import { api } from './api.js';
-import { toast } from './ui.js';
+import { toast , reportError} from './ui.js';
 
 const FAB_HTML = `
   <button id="feedbackFab" class="feedback-fab" type="button" aria-haspopup="dialog" aria-controls="feedbackModal" title="Send feedback or an idea">
@@ -82,7 +82,7 @@ async function onSubmit(e) {
     form.reset();
     close();
   } catch (err) {
-    toast(err.message || 'Could not send feedback.', 'error');
+    reportError(err, 'Could not send feedback.');
   } finally {
     if (submitBtn) submitBtn.disabled = false;
   }

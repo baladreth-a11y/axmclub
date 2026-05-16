@@ -1,7 +1,7 @@
 import { $ } from './util.js';
 import { api } from './api.js';
 import { store } from './store.js';
-import { toast } from './ui.js';
+import { toast , reportError} from './ui.js';
 import { openModal, closeModal } from './modal.js';
 import { refreshLeaderboard } from './leaderboard.js';
 import { showOnboarding } from './onboarding.js';
@@ -40,6 +40,9 @@ export function initAuth() {
   onSubmit('#registerForm', async e => {
     e.preventDefault();
     const fd = new FormData(e.target);
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    const originalText = submitBtn ? submitBtn.textContent : null;
+    if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Creating account…'; }
     try {
       const { user } = await api.register({
         name: fd.get('name'),
@@ -53,12 +56,16 @@ export function initAuth() {
       refreshLeaderboard();
       toast('Welcome to AxMclub!', 'success');
       showOnboarding('register');
-    } catch (err) { toast(err.message, 'error'); }
+    } catch (err) { reportError(err); }
+    finally { if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = originalText; } }
   });
 
   onSubmit('#loginForm', async e => {
     e.preventDefault();
     const fd = new FormData(e.target);
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    const originalText = submitBtn ? submitBtn.textContent : null;
+    if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Signing in…'; }
     try {
       const { user } = await api.login({
         email: fd.get('email'),
@@ -73,7 +80,8 @@ export function initAuth() {
       } else {
         closeModal();
       }
-    } catch (err) { toast(err.message, 'error'); }
+    } catch (err) { reportError(err); }
+    finally { if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = originalText; } }
   });
 
   onClick('#openLogin',     () => openModal('login'));

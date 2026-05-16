@@ -1,23 +1,14 @@
 import { $ } from './util.js';
 import { api } from './api.js';
 import { store } from './store.js';
-import { toast } from './ui.js';
-import { initModal } from './modal.js';
-import { initHeader } from './header.js';
-import { initHeroStats } from './heroStats.js';
+import { toast , reportError} from './ui.js';
+import { initSharedLayout } from './layout.js';
 import { initWheel } from './wheel.js';
 import { initLeaderboard, refreshLeaderboard } from './leaderboard.js';
 import { initRewards, refreshRewards } from './rewards.js';
-import { initProfile } from './profile.js';
-import { initAuth } from './auth.js';
 import { initTasks, refreshTasks } from './tasks.js';
 import { initCamroom } from './camroom.js';
-import { initGate } from './gate.js';
 import { initUserWidget } from './userWidget.js';
-import { initModels } from './models.js';
-import { initVerifyBanner } from './verify.js';
-import { initOnboarding } from './onboarding.js';
-import { initFeedback } from './feedback.js';
 
 // -------- Global error boundary ---------------------------------
 // Any uncaught JS error or unhandled promise rejection in the site
@@ -66,24 +57,13 @@ if (document.readyState === 'loading') {
 }
 
 async function bootstrap() {
-  $('#year').textContent = new Date().getFullYear();
-
-  initModal();
-  initGate();
-  initHeader();
-  initHeroStats();
+  initSharedLayout();
   initWheel();
   initLeaderboard();
   initRewards();
   initTasks();
   initCamroom();
-  initProfile();
-  initAuth();
   initUserWidget();
-  initModels();
-  initVerifyBanner();
-  initOnboarding();
-  initFeedback();
 
   // Initial data load. Don't block UI on failures.
   const [meRes, statsRes] = await Promise.allSettled([api.me(), api.stats()]);

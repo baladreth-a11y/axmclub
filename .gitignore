@@ -1,8 +1,14 @@
 # Runtime data (generated on first request)
 data/
 uploads/
+logs/
 *.log
 *.log.*
+*.pid
+
+# Deployment artefacts (don't commit build bundles)
+*.zip
+*.tar.gz
 
 # Server redirect logs used by e2e harness
 server.out.log

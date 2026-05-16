@@ -1,7 +1,7 @@
 import { $, escapeHtml } from './util.js';
 import { api } from './api.js';
 import { store } from './store.js';
-import { toast } from './ui.js';
+import { toast , reportError} from './ui.js';
 import { openModal, closeModal } from './modal.js';
 
 function formatRank(rank) {
@@ -31,7 +31,7 @@ async function onBuyTokens(e) {
     closeModal();
     toast(`Added ${res.bought.toLocaleString()} tokens to your account.`, 'success');
   } catch (err) {
-    toast(err.message, 'error');
+    reportError(err);
   }
 }
 
@@ -47,7 +47,7 @@ async function onSubmitOffer(e) {
     e.target.reset();
     toast('Offer sent. The host team will review it.', 'success');
   } catch (err) {
-    toast(err.message, 'error');
+    reportError(err);
   }
 }
 

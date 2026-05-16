@@ -10,6 +10,49 @@ function saveAgeConfirmed() {
   try { localStorage.setItem(AGE_KEY, '1'); } catch { /* ignore */ }
 }
 
+// ---- Focus trap ---------------------------------------------------------
+// While the gate is visible and focused, Tab/Shift+Tab cycle within it so
+// keyboard users cannot accidentally move focus to blurred background content.
+const FOCUSABLE = 'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+function getFocusables(gate) {
+  return Array.from(gate.querySelectorAll(FOCUSABLE)).filter(el => {
+    return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+  });
+}
+
+function handleFocusTrap(e) {
+  const gate = $('#gate');
+  if (!gate || gate.classList.contains('hidden')) return;
+  if (e.key !== 'Tab') return;
+  const focusables = getFocusables(gate);
+  if (!focusables.length) return;
+  const first = focusables[0];
+  const last  = focusables[focusables.length - 1];
+  if (e.shiftKey) {
+    if (document.activeElement === first) { e.preventDefault(); last.focus(); }
+  } else {
+    if (document.activeElement === last)  { e.preventDefault(); first.focus(); }
+  }
+}
+
+let trapAttached = false;
+function attachTrap() {
+  if (trapAttached) return;
+  document.addEventListener('keydown', handleFocusTrap);
+  trapAttached = true;
+}
+
+// Move focus to the first interactive button inside the active gate stage.
+function focusGate() {
+  const gate = $('#gate');
+  if (!gate || gate.classList.contains('hidden')) return;
+  requestAnimationFrame(() => {
+    const firstBtn = gate.querySelector('[data-stage]:not(.hidden) button:not([disabled]), [data-stage]:not(.hidden) a[href]');
+    if (firstBtn) firstBtn.focus();
+  });
+}
+
 function render(state) {
   const signedIn = !!state.user;
   const ageOk    = ageConfirmed();
@@ -55,6 +98,8 @@ function render(state) {
     if (ageStage)  ageStage.classList.add('hidden');
     if (authStage) authStage.classList.remove('hidden');
   }
+
+  focusGate();
 }
 
 function onAgeConfirm() {
@@ -65,6 +110,7 @@ function onAgeConfirm() {
 export function initGate() {
   // HTML ships with both gate classes already applied so we don't flash
   // unauthenticated content. This call reconciles with actual state.
+  attachTrap();
   render(store.get());
   store.subscribe(render);
 

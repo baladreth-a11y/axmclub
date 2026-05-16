@@ -5,7 +5,7 @@
 // every 8 s for unread counts. Mounted on every page by initSharedLayout.
 import { api } from './api.js';
 import { store } from './store.js';
-import { toast } from './ui.js';
+import { toast , reportError} from './ui.js';
 import { startCall } from './camCall.js';
 
 const POLL_THREADS_MS  = 8000;
@@ -213,6 +213,7 @@ function showChatView(peerEmail, peerName) {
   $('#commOnlineList').classList.add('hidden');
   $('#commThreadList').classList.add('hidden');
   $('#commChatView').classList.remove('hidden');
+  // Only disable other tabs if we're signed in and switching to a thread.
   document.querySelectorAll('.comm-tab').forEach(t => t.classList.add('is-disabled'));
   renderPeerHeader(peerName || peerEmail, false, false);
   $('#commMessages').innerHTML = '<div class="comm-empty">Loading\u2026</div>';
@@ -255,7 +256,14 @@ function setActiveTab(tab) {
   $('#commRoomView').classList.toggle('hidden', tab !== 'room');
   if (tab === 'online') fetchOnline();
   if (tab === 'threads') fetchThreads();
-  if (tab === 'room') fetchRoomMessages(true);
+  if (tab === 'room') {
+    roomSince = 0;
+    roomMessagesCache = [];
+    fetchRoomMessages(true);
+    startRoomTimer();
+  } else {
+    stopRoomTimer();
+  }
 }
 
 async function fetchOnline() {
@@ -348,7 +356,7 @@ async function onSend(e) {
     }
     fetchThreads();
   } catch (err) {
-    toast(err.message || 'Could not send message.', 'error');
+    reportError(err, 'Could not send message.');
   } finally {
     ta.disabled = false;
     ta.focus();
@@ -386,16 +394,18 @@ function stopOnlineTimer() { if (onlineTimer) { clearInterval(onlineTimer); onli
 
 function refreshForUser(user) {
   if (!user) {
-    // Anonymous: hide signed-in views, show prompt.
+    // Anonymous: show only the public Room tab; hide Online/Threads/Chat.
     $('#commOnlineList').classList.add('hidden');
     $('#commThreadList').classList.add('hidden');
-    $('#commRoomView').classList.add('hidden');
     $('#commChatView').classList.add('hidden');
-    $('#commSignedOut').classList.remove('hidden');
+    $('#commSignedOut').classList.add('hidden');
+
+    // Default anonymous users to the Room tab.
+    setActiveTab('room');
+
     renderUnreadBadge(0);
     stopThreadsTimer();
     stopMessagesTimer();
-    stopRoomTimer();
     stopOnlineTimer();
     return;
   }
@@ -489,7 +499,7 @@ export function initCommunicator() {
       ta.value = '';
       fetchRoomMessages(true);
     } catch (err) {
-      toast(err.message || 'Could not send room message.', 'error');
+      reportError(err, 'Could not send room message.');
     } finally {
       ta.disabled = false;
       ta.focus();
@@ -514,7 +524,7 @@ export function initCommunicator() {
       if (err.status === 403 && err.data && err.data.reason === 'cam2cam-off') {
         toast('Both sides need cam2cam enabled.', 'info');
       } else {
-        toast(err.message || 'Could not send cam2cam request.', 'error');
+        reportError(err, 'Could not send cam2cam request.');
       }
     }
   });
