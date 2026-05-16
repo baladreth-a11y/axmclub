@@ -48,55 +48,59 @@ function Get-User($email) {
     $r = $rows[0]
     
     $u = @{
-        email = $r.email
-        name = if ($r.name -is [System.DBNull]) { $null } else { $r.name }
-        password = $r.password
-        points = [int]$r.points
-        tokens = [int]$r.tokens
-        spins = [int]$r.spins
-        lastSpin = [long]$r.lastSpin
-        isModel = [bool]$r.isModel
-        createdAt = [long]$r.createdAt
-        rank = if ($r.rank -is [System.DBNull]) { $null } else { $r.rank }
-        cam2cam = [bool]$r.cam2cam
-        bio = if ($r.bio -is [System.DBNull]) { $null } else { $r.bio }
-        photo = if ($r.photo -is [System.DBNull]) { $null } else { $r.photo }
-        gallery = if ($r.gallery -and $r.gallery -ne "[]") { ConvertFrom-Json $r.gallery } else { @() }
-        tasks = if ($r.tasks -and $r.tasks -ne "{}") { ConvertFrom-Json $r.tasks -AsHashtable } else { @{} }
-        redemptions = if ($r.redemptions -and $r.redemptions -ne "[]") { ConvertFrom-Json $r.redemptions } else { @() }
+        email         = $r.email
+        name          = if ($r.name -is [System.DBNull]) { $null } else { $r.name }
+        pwHash        = if ($r.pwHash -is [System.DBNull]) { $null } else { $r.pwHash }
+        pwSalt        = if ($r.pwSalt -is [System.DBNull]) { $null } else { $r.pwSalt }
+        points        = [int]$r.points
+        tokens        = [int]$r.tokens
+        spins         = [int]$r.spins
+        lastSpinMs    = [long]$r.lastSpinMs
+        accountType   = if ($r.accountType -is [System.DBNull]) { 'supporter' } else { $r.accountType }
+        joinedMs      = [long]$r.joinedMs
+        emailVerified = [bool]$r.emailVerified
+        verifyToken   = if ($r.verifyToken -is [System.DBNull]) { $null } else { $r.verifyToken }
+        verifyTokenExpires = [long]$r.verifyTokenExpires
+        bio           = if ($r.bio -is [System.DBNull]) { '' } else { $r.bio }
+        brandColor    = if ($r.brandColor -is [System.DBNull]) { '' } else { $r.brandColor }
+        gender        = if ($r.gender -is [System.DBNull]) { '' } else { $r.gender }
+        rank          = if ($r.rank -is [System.DBNull]) { '' } else { $r.rank }
+        gallery       = if ($r.gallery -is [System.DBNull]) { @() } else { $r.gallery | ConvertFrom-Json | ConvertTo-Hashtable }
+        tasks         = if ($r.tasks -is [System.DBNull]) { @{} } else { $r.tasks | ConvertFrom-Json | ConvertTo-Hashtable }
+        redemptions   = if ($r.redemptions -is [System.DBNull]) { @() } else { $r.redemptions | ConvertFrom-Json | ConvertTo-Hashtable }
+        socials       = if ($r.socials -is [System.DBNull]) { @{} } else { $r.socials | ConvertFrom-Json | ConvertTo-Hashtable }
     }
     return $u
 }
 
 function Save-User($u) {
-    $q = @"
-    INSERT INTO users (email, name, password, points, tokens, spins, lastSpin, isModel, createdAt, rank, cam2cam, bio, photo, gallery, tasks, redemptions)
-    VALUES (@email, @name, @password, @points, @tokens, @spins, @lastSpin, @isModel, @createdAt, @rank, @cam2cam, @bio, @photo, @gallery, @tasks, @redemptions)
-    ON CONFLICT(email) DO UPDATE SET
-        name=excluded.name, password=excluded.password, points=excluded.points, tokens=excluded.tokens,
-        spins=excluded.spins, lastSpin=excluded.lastSpin, isModel=excluded.isModel, createdAt=excluded.createdAt,
-        rank=excluded.rank, cam2cam=excluded.cam2cam, bio=excluded.bio, photo=excluded.photo,
-        gallery=excluded.gallery, tasks=excluded.tasks, redemptions=excluded.redemptions;
-"@
-    $p = @{
-        "@email" = $u.email.ToLowerInvariant()
-        "@name" = if ($u.name) { $u.name } else { [System.DBNull]::Value }
-        "@password" = $u.password
-        "@points" = [int]$u.points
-        "@tokens" = [int]$u.tokens
-        "@spins" = [int]$u.spins
-        "@lastSpin" = [long]$u.lastSpin
-        "@isModel" = if ($u.isModel) { 1 } else { 0 }
-        "@createdAt" = [long]$u.createdAt
-        "@rank" = if ($u.rank) { $u.rank } else { [System.DBNull]::Value }
-        "@cam2cam" = if ($u.cam2cam) { 1 } else { 0 }
-        "@bio" = if ($u.bio) { $u.bio } else { [System.DBNull]::Value }
-        "@photo" = if ($u.photo) { $u.photo } else { [System.DBNull]::Value }
-        "@gallery" = if ($u.gallery) { ConvertTo-Json @($u.gallery) -Compress } else { "[]" }
-        "@tasks" = if ($u.tasks) { ConvertTo-Json $u.tasks -Compress } else { "{}" }
-        "@redemptions" = if ($u.redemptions) { ConvertTo-Json @($u.redemptions) -Compress } else { "[]" }
+    $q = "INSERT OR REPLACE INTO users (email, name, pwHash, pwSalt, points, tokens, spins, lastSpinMs, accountType, joinedMs, emailVerified, verifyToken, verifyTokenExpires, bio, brandColor, gender, rank, gallery, tasks, redemptions, socials) 
+          VALUES (@email, @name, @pwHash, @pwSalt, @points, @tokens, @spins, @lastSpinMs, @accountType, @joinedMs, @emailVerified, @verifyToken, @verifyTokenExpires, @bio, @brandColor, @gender, @rank, @gallery, @tasks, @redemptions, @socials)"
+    
+    $params = @{
+        "@email"         = [string]$u.email.ToLowerInvariant()
+        "@name"          = [string]$u.name
+        "@pwHash"        = [string]$u.pwHash
+        "@pwSalt"        = [string]$u.pwSalt
+        "@points"        = [int]$u.points
+        "@tokens"        = [int]$u.tokens
+        "@spins"         = [int]$u.spins
+        "@lastSpinMs"    = [long]$u.lastSpinMs
+        "@accountType"   = [string]$u.accountType
+        "@joinedMs"      = [long]$u.joinedMs
+        "@emailVerified" = [int]$(if ($u.emailVerified) { 1 } else { 0 })
+        "@verifyToken"   = [string]$u.verifyToken
+        "@verifyTokenExpires" = [long]$u.verifyTokenExpires
+        "@bio"           = [string]$u.bio
+        "@brandColor"    = [string]$u.brandColor
+        "@gender"        = [string]$u.gender
+        "@rank"          = [string]$u.rank
+        "@gallery"       = $(if ($u.gallery) { ConvertTo-Json @($u.gallery) -Compress } else { "[]" })
+        "@tasks"         = $(if ($u.tasks) { ConvertTo-Json $u.tasks -Compress } else { "{}" })
+        "@redemptions"   = $(if ($u.redemptions) { ConvertTo-Json @($u.redemptions) -Compress } else { "[]" })
+        "@socials"       = $(if ($u.socials) { ConvertTo-Json $u.socials -Compress } else { "{}" })
     }
-    Invoke-SqlQuery -query $q -parameters $p | Out-Null
+    Invoke-SqlQuery -query $q -parameters $params | Out-Null
 }
 
 function Get-AllUsers {
@@ -199,34 +203,62 @@ function Get-AllThreads() {
 
 
 function Load-DatabaseToMemory {
-    $db = @{
-        users    = @{}
-        sessions = @{}
-        stats    = Get-Stats
-        results  = @()
-        feedback = @()
-        threads  = @{}
-        publicChat = Get-RoomMessages 0
-        config   = Get-Config
+    $db = @{ users=@{}; sessions=@{}; stats=@{members=0;spins=0;offersPending=0;offersAccepted=0}; results=@(); feedback=@(); threads=@{}; publicChat=@(); config=@{} }
+    
+    # Stats
+    $row = Invoke-SqlQuery -query "SELECT * FROM stats WHERE id = 1"
+    if ($row) {
+        $db.stats.members = [int]$row.members
+        $db.stats.spins = [int]$row.spins
+        $db.stats.offersPending = [int]$row.offersPending
+        $db.stats.offersAccepted = [int]$row.offersAccepted
     }
     
-    foreach ($u in Get-AllUsers) { $db.users[$u.email] = $u }
-    
-    $rows = Invoke-SqlQuery "SELECT * FROM sessions"
+    # Users
+    $rows = Invoke-SqlQuery -query "SELECT email FROM users"
     foreach ($r in $rows) {
-        $db.sessions[$r.token] = @{ token=$r.token; email=$r.email; createdAt=[long]$r.createdAt }
+        $u = Get-User $r.email
+        if ($u) { $db.users[$u.email] = $u }
     }
     
-    foreach ($f in Get-Feedback) { $db.feedback += $f }
+    # Sessions
+    $rows = Invoke-SqlQuery -query "SELECT * FROM sessions"
+    foreach ($r in $rows) {
+        $db.sessions[$r.token] = $r.email
+    }
+
+    # Public Chat
+    $db.publicChat = Get-RoomMessages 0
     
-    foreach ($t in Get-AllThreads) { $db.threads[$t.id] = $t }
+    # Feedback
+    $db.feedback = Get-Feedback
     
+    # Threads (Hashtable indexed by email_a:email_b)
+    $rows = Invoke-SqlQuery -query "SELECT * FROM threads"
+    foreach ($r in $rows) {
+        $key = "$($r.email_a):$($r.email_b)"
+        $db.threads[$key] = @{
+            id       = $r.id
+            a        = $r.email_a
+            b        = $r.email_b
+            lastMs   = [long]$r.lastMs
+            lastRead = if ($r.lastRead -is [System.DBNull]) { @{} } else { $r.lastRead | ConvertFrom-Json | ConvertTo-Hashtable }
+            messages = if ($r.messages -is [System.DBNull]) { @() } else { $r.messages | ConvertFrom-Json | ConvertTo-Hashtable }
+        }
+    }
+
+    # Config
+    $rows = Invoke-SqlQuery -query "SELECT * FROM config"
+    foreach ($r in $rows) {
+        $db.config[$r.key] = $r.value | ConvertFrom-Json | ConvertTo-Hashtable
+    }
+
     return $db
 }
 
 function Save-MemoryToDatabase($db) {
     if ($db.users) { foreach ($u in $db.users.Values) { Save-User $u } }
-    if ($db.sessions) { foreach ($s in $db.sessions.Values) { Save-Session $s } }
+    if ($db.sessions) { foreach ($s in $db.sessions.Keys) { Save-Session @{token=$s; email=$db.sessions[$s]; createdAt=0} } }
     if ($db.stats) { Save-Stats $db.stats }
     if ($db.threads) { foreach ($t in $db.threads.Values) { Save-Thread $t } }
     if ($db.publicChat) { foreach ($m in $db.publicChat) { Save-RoomMessage $m } }
