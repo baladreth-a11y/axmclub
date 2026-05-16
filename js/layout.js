@@ -151,7 +151,32 @@ const modalMarkup = `
             <input name="password" type="password" required placeholder="Your password" autocomplete="current-password" />
           </label>
           <button class="btn btn-primary btn-block" type="submit">Sign in</button>
+          <p class="switch"><a href="#" onclick="switchView('forgot-password'); return false;">Forgot password?</a></p>
           <p class="switch">New here? <a href="#" onclick="switchView('register'); return false;">Create account</a></p>
+        </form>
+      </div>
+
+      <div class="modal-view hidden" data-view="forgot-password">
+        <h3>Reset Password</h3>
+        <p class="muted">Enter your email to receive a reset link.</p>
+        <form id="forgotPasswordForm" class="form">
+          <label>Email
+            <input name="email" type="email" required placeholder="you@domain.com" autocomplete="email" />
+          </label>
+          <button class="btn btn-primary btn-block" type="submit">Send Reset Link</button>
+          <p class="switch"><a href="#" onclick="switchView('login'); return false;">Back to Sign In</a></p>
+        </form>
+      </div>
+
+      <div class="modal-view hidden" data-view="reset-password">
+        <h3>Choose New Password</h3>
+        <p class="muted">Enter a new secure password.</p>
+        <form id="resetPasswordForm" class="form">
+          <input type="hidden" name="token" id="resetPasswordToken" />
+          <label>New Password
+            <input name="password" type="password" required minlength="8" placeholder="At least 8 characters" autocomplete="new-password" />
+          </label>
+          <button class="btn btn-primary btn-block" type="submit">Update Password</button>
         </form>
       </div>
 

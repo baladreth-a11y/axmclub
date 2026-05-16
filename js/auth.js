@@ -84,6 +84,39 @@ export function initAuth() {
     finally { if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = originalText; } }
   });
 
+  onSubmit('#forgotPasswordForm', async e => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    const originalText = submitBtn ? submitBtn.textContent : null;
+    if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Sending…'; }
+    try {
+      const res = await api.authResetRequest(fd.get('email'));
+      e.target.reset();
+      toast(res.message || 'Reset link sent.', 'success');
+      switchView('login');
+    } catch (err) { reportError(err); }
+    finally { if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = originalText; } }
+  });
+
+  onSubmit('#resetPasswordForm', async e => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    const originalText = submitBtn ? submitBtn.textContent : null;
+    if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Updating…'; }
+    try {
+      await api.authResetPassword({
+        token: fd.get('token'),
+        password: fd.get('password')
+      });
+      e.target.reset();
+      toast('Password updated successfully. You can now sign in.', 'success');
+      switchView('login');
+    } catch (err) { reportError(err); }
+    finally { if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = originalText; } }
+  });
+
   onClick('#openLogin',     () => openModal('login'));
   onClick('#openRegister',  () => openModal('register'));
   onClick('#openProfile',   () => {

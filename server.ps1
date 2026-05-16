@@ -181,34 +181,17 @@ $LogPath = Join-Path $Root 'server.log'
 if (-not (Test-Path $DataDir))    { New-Item -ItemType Directory $DataDir    | Out-Null }
 if (-not (Test-Path $UploadsDir)) { New-Item -ItemType Directory $UploadsDir | Out-Null }
 
+. (Join-Path $Root 'db-sqlite.ps1')
+
 $Script:DbLock = New-Object object
 # Load DB into memory once at startup for performance.
 # We only write to disk on modification, never read on request.
 function Get-Db {
-  if (-not (Test-Path $DbPath)) {
-    return @{
-      users    = @{}
-      sessions = @{}
-      stats    = @{ members = 0; spins = 0 }
-      results  = @()
-      feedback = @()
-      threads  = @{}
-    }
-  }
   try {
-    $raw = Get-Content $DbPath -Raw -Encoding UTF8
-    if (-not $raw) { return @{ users=@{}; sessions=@{}; stats=@{members=0;spins=0}; results=@() } }
-    $obj = $raw | ConvertFrom-Json
-    $h = ConvertTo-Hashtable $obj
-    if (-not $h.users)    { $h.users    = @{} }
-    if (-not $h.sessions) { $h.sessions = @{} }
-    if (-not $h.stats)    { $h.stats    = @{ members = 0; spins = 0 } }
-    if (-not $h.results)  { $h.results  = @() }
-    if (-not $h.feedback) { $h.feedback = @() }
-    return $h
+    return Load-DatabaseToMemory
   } catch {
-    Write-Host "CRITICAL: Failed to load DB: $_" -ForegroundColor Red
-    return @{ users=@{}; sessions=@{}; stats=@{members=0;spins=0}; results=@() }
+    Write-Host "CRITICAL: Failed to load DB from SQLite: $_" -ForegroundColor Red
+    return @{ users=@{}; sessions=@{}; stats=@{members=0;spins=0}; results=@(); feedback=@(); threads=@{}; publicChat=@() }
   }
 }
 
@@ -272,12 +255,7 @@ $Script:CallSignalKinds       = @('offer','answer','ice','bye')
 function Save-Db($db) {
   try {
     $Script:Db = $db
-    $json = $db | ConvertTo-Json -Depth 20
-    $tmp = "$DbPath.tmp"
-    [System.IO.File]::WriteAllText($tmp, $json, [System.Text.Encoding]::UTF8)
-    if (Test-Path $tmp) {
-        Move-Item -Force $tmp $DbPath
-    }
+    Save-MemoryToDatabase $db
     return $true
   } catch {
     Write-Host "CRITICAL: Database SAVE FAILED: $_" -ForegroundColor Red
@@ -1044,6 +1022,73 @@ function Invoke-AuthHandler($req, $resp, $db, $path, $method) {
       $db.sessions[$sid] = $email
       Save-Db $db
       Send-Json $resp @{ user = (Get-PublicUser $u) } 200 @((New-SessionCookie $sid))
+      return $true
+    }
+
+    'POST /api/auth/reset-request' {
+      $body = Read-JsonBody $req
+      $email = ("$($body.email)").Trim().ToLowerInvariant()
+      if (-not $email) {
+        Send-Json $resp @{ error = 'Email is required.' } 400
+        return $true
+      }
+      $u = $db.users[$email]
+      if (-not $u) {
+        # Always return success to prevent email enumeration
+        Send-Json $resp @{ ok = $true } 200
+        return $true
+      }
+      $token = New-Token
+      if (-not $db.passwordResets) { $db.passwordResets = @{} }
+      $db.passwordResets[$token] = @{
+        email = $email
+        expires = (NowMs) + 3600000 # 1 hour
+      }
+      
+      $baseUrl = $env:AURUM_BASE_URL
+      if (-not $baseUrl) { $baseUrl = "http://localhost:$Script:Port" }
+      $link = "$baseUrl/?reset_token=$token"
+      
+      # Mock sending the email for now or write to log
+      Write-Host "[Password Reset] Link for $email : $link" -ForegroundColor Cyan
+      Write-ServerLog("[Password Reset] Link for $email : $link")
+      
+      Send-Json $resp @{ ok = $true; message = 'If that email exists, a reset link has been sent.' } 200
+      return $true
+    }
+
+    'POST /api/auth/reset-password' {
+      $body = Read-JsonBody $req
+      $token = "$($body.token)"
+      $newPassword = "$($body.password)"
+      if (-not $token -or -not $newPassword -or $newPassword.Length -lt 8) {
+        Send-Json $resp @{ error = 'Invalid token or password.' } 400
+        return $true
+      }
+      if (-not $db.passwordResets -or -not $db.passwordResets.ContainsKey($token)) {
+        Send-Json $resp @{ error = 'Invalid or expired token.' } 400
+        return $true
+      }
+      $reset = $db.passwordResets[$token]
+      if ((NowMs) -gt $reset.expires) {
+        $db.passwordResets.Remove($token)
+        Send-Json $resp @{ error = 'Expired token.' } 400
+        return $true
+      }
+      $email = $reset.email
+      $u = $db.users[$email]
+      if (-not $u) {
+        Send-Json $resp @{ error = 'User not found.' } 400
+        return $true
+      }
+      
+      $salt = New-Salt
+      $hash = Get-PasswordHash $newPassword $salt
+      $u.password = $hash
+      $db.passwordResets.Remove($token)
+      Save-Db $db
+      
+      Send-Json $resp @{ ok = $true } 200
       return $true
     }
 
@@ -2028,6 +2073,40 @@ function Invoke-ModelHandler($req, $resp, $db, $path, $method) {
 function Invoke-AdminHandler($req, $resp, $db, $path, $method) {
   $key = "$method $path"
   switch ($key) {
+
+    'GET /api/admin/config' {
+      if (-not (Assert-Admin $req $resp)) { return $true }
+      Send-Json $resp @{
+        wheelVariants = $Script:WheelVariants
+        tasks = $Script:Tasks
+        catalog = $Script:Catalog
+      }
+      return $true
+    }
+
+    'POST /api/admin/config' {
+      if (-not (Assert-Admin $req $resp)) { return $true }
+      $body = Read-JsonBody $req
+      if ($body.wheelVariants) {
+        $Script:WheelVariants = $body.wheelVariants
+        $Script:Segments = $Script:WheelVariants['default']
+        if (-not $db.config) { $db.config = @{} }
+        $db.config.WheelVariants = $Script:WheelVariants
+      }
+      if ($body.tasks) {
+        $Script:Tasks = $body.tasks
+        if (-not $db.config) { $db.config = @{} }
+        $db.config.Tasks = $Script:Tasks
+      }
+      if ($body.catalog) {
+        $Script:Catalog = $body.catalog
+        if (-not $db.config) { $db.config = @{} }
+        $db.config.Catalog = $Script:Catalog
+      }
+      Save-Db $db
+      Send-Json $resp @{ ok = $true }
+      return $true
+    }
 
     'GET /api/admin/passwords' {
       if (-not (Assert-Admin $req $resp)) { return $true }

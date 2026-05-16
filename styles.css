@@ -2611,3 +2611,56 @@
   .feedback-row.is-resolved { opacity: 0.55; }
   .feedback-row.is-archived { opacity: 0.4; }
 }
+
+/* === Ad Placements (Crackrevenue) === */
+.ad-rail {
+    display: none; /* Hidden on mobile */
+    position: fixed;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 160px;
+    height: 600px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px dashed rgba(255, 255, 255, 0.2);
+    border-radius: var(--radius-md);
+    text-align: center;
+    color: var(--text-muted);
+    z-index: 100;
+}
+.ad-rail::before {
+    content: 'Premium Upgrades\A Support AxMclub';
+    white-space: pre-wrap;
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 0.8rem;
+    opacity: 0.5;
+}
+.ad-left { left: 1rem; }
+.ad-right { right: 1rem; }
+
+.ad-bottom {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    width: 100%;
+    height: 50px;
+    background: rgba(0, 0, 0, 0.8);
+    backdrop-filter: blur(10px);
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    z-index: 999;
+}
+.ad-bottom::before {
+    content: 'AxMclub Premium - Remove Ads';
+    opacity: 0.5;
+}
+
+@media (min-width: 1200px) {
+    .ad-rail { display: block; }
+}

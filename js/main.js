@@ -76,6 +76,20 @@ async function bootstrap() {
   // Mark successful bootstrap
   window.axmBootstrapped = true;
   console.log('[axm] bootstrap complete');
+
+  // Handle password reset token
+  const params = new URLSearchParams(window.location.search);
+  const resetToken = params.get('reset_token');
+  if (resetToken) {
+    // wait a tick for the DOM to settle
+    setTimeout(() => {
+      openModal('reset-password');
+      const tokenInput = $('#resetPasswordToken');
+      if (tokenInput) tokenInput.value = resetToken;
+      // remove token from URL cleanly
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }, 100);
+  }
 }
 
 bootstrap().catch((err) => {
