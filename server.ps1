@@ -798,7 +798,10 @@ function Send-VerifyEmail([string]$toEmail, [string]$toName, [string]$token, [st
 </html>
 "@
     $client = New-Object Net.Mail.SmtpClient($smtpHost, $smtpPort)
-    $client.EnableSsl = $true
+    # Port 465 usually requires Implicit SSL which SmtpClient doesn't support well.
+    # Port 587 uses STARTTLS which EnableSsl handles correctly.
+    if ($smtpPort -ne 465) { $client.EnableSsl = $true }
+    
     $client.Timeout = 10000 # 10s timeout
     if ($smtpUser -and $smtpPass) {
       $client.Credentials = New-Object Net.NetworkCredential($smtpUser, $smtpPass)
@@ -807,8 +810,10 @@ function Send-VerifyEmail([string]$toEmail, [string]$toName, [string]$token, [st
     Write-Host "[Verify] Email sent to $toEmail (via $smtpHost)" -ForegroundColor Green
     Write-ServerLog("[Verify] Email sent to $toEmail (via $smtpHost)")
   } catch {
-    Write-Host "WARN: failed to send verify email to $toEmail : $_" -ForegroundColor Yellow
-    Write-ServerLog("WARN: failed to send verify email to $toEmail : $_")
+    $err = $_.Exception.Message
+    if ($_.Exception.InnerException) { $err += " -> " + $_.Exception.InnerException.Message }
+    Write-Host "WARN: failed to send verify email to $toEmail via $smtpHost : $err" -ForegroundColor Yellow
+    Write-ServerLog("WARN: failed to send verify email to $toEmail via $smtpHost : $err")
   }
 }
 

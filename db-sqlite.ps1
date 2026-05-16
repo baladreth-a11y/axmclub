@@ -43,12 +43,13 @@ function Invoke-SqlQuery($query, $parameters = @{}) {
 
 function Get-User($email) {
     if (-not $email) { return $null }
-    $rows = Invoke-SqlQuery -query "SELECT * FROM users WHERE email = @email" -parameters @{"@email" = $email.ToLowerInvariant()}
+    $emailLc = $email.ToLowerInvariant()
+    $rows = Invoke-SqlQuery -query "SELECT * FROM users WHERE email = @email" -parameters @{"@email" = $emailLc}
     if (-not $rows) { return $null }
     $r = $rows[0]
     
     $u = @{
-        email         = $r.email
+        email         = $emailLc
         name          = if ($r.name -is [System.DBNull]) { $null } else { $r.name }
         pwHash        = if ($r.pwHash -is [System.DBNull]) { $null } else { $r.pwHash }
         pwSalt        = if ($r.pwSalt -is [System.DBNull]) { $null } else { $r.pwSalt }
@@ -218,7 +219,7 @@ function Load-DatabaseToMemory {
     $rows = Invoke-SqlQuery -query "SELECT email FROM users"
     foreach ($r in $rows) {
         $u = Get-User $r.email
-        if ($u) { $db.users[$u.email] = $u }
+        if ($u) { $db.users[$u.email.ToLowerInvariant()] = $u }
     }
     
     # Sessions
