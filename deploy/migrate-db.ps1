@@ -1,8 +1,9 @@
 $ErrorActionPreference = 'Stop'
 
 $base = Split-Path -Parent $MyInvocation.MyCommand.Path
-$binDir = Join-Path (Split-Path -Parent $base) 'bin'
-$dataDir = Join-Path (Split-Path -Parent $base) 'data'
+$Root = Split-Path -Parent $base
+$binDir = Join-Path $Root 'bin'
+$dataDir = Join-Path $Root 'data'
 $dbJson = Join-Path $dataDir 'db.json'
 $dbSqlite = Join-Path $dataDir 'database.sqlite'
 
@@ -10,14 +11,29 @@ $dbSqlite = Join-Path $dataDir 'database.sqlite'
 Add-Type -Path (Join-Path $binDir 'System.Data.SQLite.dll')
 
 if (-not (Test-Path $dbJson)) {
-    Write-Host "db.json not found."
+    Write-Host "db.json not found. Nothing to migrate." -ForegroundColor Yellow
     exit
 }
 
 $json = Get-Content $dbJson -Raw | ConvertFrom-Json
 
+# Helper to hash legacy passwords
+function Get-LocalHash($password, $salt) {
+    $iterations = 100000
+    $saltBytes = [Convert]::FromBase64String($salt)
+    $rfc = New-Object System.Security.Cryptography.Rfc2898DeriveBytes($password, $saltBytes, $iterations, [System.Security.Cryptography.HashAlgorithmName]::SHA256)
+    $hashBytes = $rfc.GetBytes(32)
+    return "${iterations}:${salt}:" + [Convert]::ToBase64String($hashBytes)
+}
+function New-LocalSalt {
+    $bytes = New-Object byte[] 16
+    [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+    return [Convert]::ToBase64String($bytes)
+}
+
 if (Test-Path $dbSqlite) {
     Remove-Item $dbSqlite -Force
+    Write-Host "Wiped old database for clean migration." -ForegroundColor Cyan
 }
 
 $connStr = "Data Source=$dbSqlite;Version=3;"
@@ -30,20 +46,25 @@ try {
     CREATE TABLE users (
         email TEXT PRIMARY KEY,
         name TEXT,
-        password TEXT,
+        pwHash TEXT,
+        pwSalt TEXT,
         points INTEGER,
         tokens INTEGER,
         spins INTEGER,
-        lastSpin INTEGER,
-        isModel INTEGER,
-        createdAt INTEGER,
-        rank TEXT,
-        cam2cam INTEGER,
+        lastSpinMs INTEGER,
+        accountType TEXT,
+        joinedMs INTEGER,
+        emailVerified INTEGER,
+        verifyToken TEXT,
+        verifyTokenExpires INTEGER,
         bio TEXT,
-        photo TEXT,
+        brandColor TEXT,
+        gender TEXT,
+        rank TEXT,
         gallery TEXT,
         tasks TEXT,
-        redemptions TEXT
+        redemptions TEXT,
+        socials TEXT
     );
     CREATE TABLE sessions (
         token TEXT PRIMARY KEY,
@@ -86,49 +107,78 @@ try {
 "@
     $cmd.ExecuteNonQuery() | Out-Null
 
-    # Migrate users
+    # Migrate users (KEEP ONLY MODELS)
     if ($json.users) {
-        Write-Host "Migrating users..."
+        Write-Host "Scanning users..." -ForegroundColor Gray
+        $count = 0
         foreach ($p in $json.users.psobject.properties) {
             $u = $p.value
-            $cmd.CommandText = "INSERT INTO users (email, name, password, points, tokens, spins, lastSpin, isModel, createdAt, rank, cam2cam, bio, photo, gallery, tasks, redemptions) VALUES (@email, @name, @password, @points, @tokens, @spins, @lastSpin, @isModel, @createdAt, @rank, @cam2cam, @bio, @photo, @gallery, @tasks, @redemptions)"
+            $acct = 'supporter'
+            if ($u.accountType) { $acct = [string]$u.accountType }
+            
+            # Erase supporters, keep models
+            if ($acct -ne 'model') { continue }
+
+            $hash = $u.pwHash
+            $salt = $u.pwSalt
+            if (-not $hash -and $u.password) {
+                # Legacy plain-text password detected, hash it now
+                $salt = New-LocalSalt
+                $hash = Get-LocalHash $u.password $salt
+            }
+
+            $q = "INSERT INTO users (email, name, pwHash, pwSalt, points, tokens, spins, lastSpinMs, accountType, joinedMs, emailVerified, verifyToken, verifyTokenExpires, bio, brandColor, gender, rank, gallery, tasks, redemptions, socials) 
+                  VALUES (@email, @name, @pwHash, @pwSalt, @points, @tokens, @spins, @lastSpinMs, @accountType, @joinedMs, @emailVerified, @verifyToken, @verifyTokenExpires, @bio, @brandColor, @gender, @rank, @gallery, @tasks, @redemptions, @socials)"
+            $cmd.CommandText = $q
             $cmd.Parameters.Clear()
             $cmd.Parameters.AddWithValue("@email", [string]$u.email) | Out-Null
             $cmd.Parameters.AddWithValue("@name", [string]$u.name) | Out-Null
-            $cmd.Parameters.AddWithValue("@password", [string]$u.password) | Out-Null
+            $cmd.Parameters.AddWithValue("@pwHash", [string]$hash) | Out-Null
+            $cmd.Parameters.AddWithValue("@pwSalt", [string]$salt) | Out-Null
             $cmd.Parameters.AddWithValue("@points", [int]$u.points) | Out-Null
             $cmd.Parameters.AddWithValue("@tokens", [int]$u.tokens) | Out-Null
             $cmd.Parameters.AddWithValue("@spins", [int]$u.spins) | Out-Null
-            $cmd.Parameters.AddWithValue("@lastSpin", [long]$u.lastSpin) | Out-Null
-            $cmd.Parameters.AddWithValue("@isModel", $(if ($u.isModel) { 1 } else { 0 })) | Out-Null
-            $cmd.Parameters.AddWithValue("@createdAt", [long]$u.createdAt) | Out-Null
-            $cmd.Parameters.AddWithValue("@rank", [string]$u.rank) | Out-Null
-            $cmd.Parameters.AddWithValue("@cam2cam", $(if ($u.cam2cam) { 1 } else { 0 })) | Out-Null
+            $cmd.Parameters.AddWithValue("@lastSpinMs", [long]$u.lastSpinMs) | Out-Null
+            $cmd.Parameters.AddWithValue("@accountType", 'model') | Out-Null
+            $cmd.Parameters.AddWithValue("@joinedMs", [long]$u.joinedMs) | Out-Null
+            $cmd.Parameters.AddWithValue("@emailVerified", $(if ($u.emailVerified) { 1 } else { 0 })) | Out-Null
+            $cmd.Parameters.AddWithValue("@verifyToken", [string]$u.verifyToken) | Out-Null
+            $cmd.Parameters.AddWithValue("@verifyTokenExpires", [long]$u.verifyTokenExpires) | Out-Null
             $cmd.Parameters.AddWithValue("@bio", [string]$u.bio) | Out-Null
-            $cmd.Parameters.AddWithValue("@photo", [string]$u.photo) | Out-Null
-            $cmd.Parameters.AddWithValue("@gallery", $(if ($u.gallery) { ConvertTo-Json @($u.gallery) -Compress -Depth 10 } else { "[]" })) | Out-Null
-            $cmd.Parameters.AddWithValue("@tasks", $(if ($u.tasks) { ConvertTo-Json $u.tasks -Compress -Depth 10 } else { "{}" })) | Out-Null
-            $cmd.Parameters.AddWithValue("@redemptions", $(if ($u.redemptions) { ConvertTo-Json @($u.redemptions) -Compress -Depth 10 } else { "[]" })) | Out-Null
+            $cmd.Parameters.AddWithValue("@brandColor", [string]$u.brandColor) | Out-Null
+            $cmd.Parameters.AddWithValue("@gender", [string]$u.gender) | Out-Null
+            $cmd.Parameters.AddWithValue("@rank", [string]$u.rank) | Out-Null
+            $cmd.Parameters.AddWithValue("@gallery", $(if ($u.gallery) { ConvertTo-Json @($u.gallery) -Compress } else { "[]" })) | Out-Null
+            $cmd.Parameters.AddWithValue("@tasks", $(if ($u.tasks) { ConvertTo-Json $u.tasks -Compress } else { "{}" })) | Out-Null
+            $cmd.Parameters.AddWithValue("@redemptions", $(if ($u.redemptions) { ConvertTo-Json @($u.redemptions) -Compress } else { "[]" })) | Out-Null
+            $cmd.Parameters.AddWithValue("@socials", $(if ($u.socials) { ConvertTo-Json $u.socials -Compress } else { "{}" })) | Out-Null
+            $cmd.ExecuteNonQuery() | Out-Null
+            $count++
+            Write-Host "  Migrated Model: $($u.email)" -ForegroundColor Green
+        }
+        Write-Host "Total Models Migrated: $count" -ForegroundColor Cyan
+    }
+
+    # Migrate stats
+    $members = 0
+    if ($json.stats) { $members = [int]$json.stats.members }
+    $cmd.CommandText = "INSERT INTO stats (id, members, spins, offersPending, offersAccepted) VALUES (1, @members, 0, 0, 0)"
+    $cmd.Parameters.Clear()
+    $cmd.Parameters.AddWithValue("@members", $members) | Out-Null
+    $cmd.ExecuteNonQuery() | Out-Null
+
+    # Migrate Config if present
+    if ($json.config) {
+        foreach ($p in $json.config.psobject.properties) {
+            $cmd.CommandText = "INSERT INTO config (key, value) VALUES (@k, @v)"
+            $cmd.Parameters.Clear()
+            $cmd.Parameters.AddWithValue("@k", $p.name) | Out-Null
+            $cmd.Parameters.AddWithValue("@v", (ConvertTo-Json $p.value -Compress)) | Out-Null
             $cmd.ExecuteNonQuery() | Out-Null
         }
     }
 
-    # Migrate stats
-    if ($json.stats) {
-        Write-Host "Migrating stats..."
-        $cmd.CommandText = "INSERT INTO stats (id, members, spins, offersPending, offersAccepted) VALUES (1, @members, @spins, @offersPending, @offersAccepted)"
-        $cmd.Parameters.Clear()
-        $cmd.Parameters.AddWithValue("@members", [int]$json.stats.members) | Out-Null
-        $cmd.Parameters.AddWithValue("@spins", [int]$json.stats.spins) | Out-Null
-        $cmd.Parameters.AddWithValue("@offersPending", [int]$json.stats.offersPending) | Out-Null
-        $cmd.Parameters.AddWithValue("@offersAccepted", [int]$json.stats.offersAccepted) | Out-Null
-        $cmd.ExecuteNonQuery() | Out-Null
-    } else {
-        $cmd.CommandText = "INSERT INTO stats (id, members, spins, offersPending, offersAccepted) VALUES (1, 0, 0, 0, 0)"
-        $cmd.ExecuteNonQuery() | Out-Null
-    }
-
-    Write-Host "Migration complete!"
+    Write-Host "CLEAN MIGRATION COMPLETE. Supporters erased, Models preserved." -ForegroundColor Cyan
 } finally {
     $conn.Close()
 }
