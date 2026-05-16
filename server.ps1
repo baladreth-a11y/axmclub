@@ -3136,7 +3136,7 @@ function Invoke-ChatHandler($req, $resp, $db, $path, $method) {
       }
       if (-not $db.publicChat) { $db.publicChat = @() }
       $now = NowMs
-      $name = if ($u) { [string]$u.name } else {
+      $name = if ($u -and $u.name) { [string]$u.name } else {
         $sid = Get-SessionId $req
         if ($sid -and $sid.StartsWith('guest-')) { 'Guest-' + $sid.Substring(6, 4).ToUpper() }
         else { 'Guest-' + (New-Token).Substring(0, 4).ToUpper() }

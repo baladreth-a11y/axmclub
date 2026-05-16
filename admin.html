@@ -306,6 +306,30 @@
       </table>
     </section>
 
+    <!-- Site Configuration -->
+    <section id="configSection" class="admin-card hidden">
+      <h2>Site Configuration</h2>
+      <p class="muted" style="margin-bottom: 16px;">Direct JSON editors for Spin Wheel variants, Rewards Catalog, and Click-to-Claim Tasks.</p>
+      
+      <form id="configForm" class="form">
+        <label>Wheel Variants (JSON)
+          <textarea id="configWheel" name="wheelVariants" rows="10" class="admin-json-textarea" style="width: 100%; font-family: monospace; font-size: 12px; padding: 12px; background: var(--bg); border: 1px solid var(--line); color: var(--text); border-radius: var(--radius-sm); margin-top: 4px;"></textarea>
+        </label>
+        
+        <label style="margin-top: 16px; display: block;">Rewards Catalog (JSON)
+          <textarea id="configCatalog" name="catalog" rows="10" class="admin-json-textarea" style="width: 100%; font-family: monospace; font-size: 12px; padding: 12px; background: var(--bg); border: 1px solid var(--line); color: var(--text); border-radius: var(--radius-sm); margin-top: 4px;"></textarea>
+        </label>
+
+        <label style="margin-top: 16px; display: block;">Tasks (JSON)
+          <textarea id="configTasks" name="tasks" rows="10" class="admin-json-textarea" style="width: 100%; font-family: monospace; font-size: 12px; padding: 12px; background: var(--bg); border: 1px solid var(--line); color: var(--text); border-radius: var(--radius-sm); margin-top: 4px;"></textarea>
+        </label>
+
+        <div style="margin-top: 24px;">
+          <button class="btn btn-primary" type="submit">Save Configuration</button>
+        </div>
+      </form>
+    </section>
+
     <!-- DB Viewer -->
     <section id="dbSection" class="admin-card hidden">
       <h2>Database viewer</h2>

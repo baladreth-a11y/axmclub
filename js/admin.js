@@ -66,6 +66,7 @@ function setUnlocked(on) {
   const fb = $('#feedbackSection'); if (fb) fb.classList.toggle('hidden', !on);
   $('#dbSection').classList.toggle('hidden', !on);
   $('#logsSection').classList.toggle('hidden', !on);
+  $('#configSection').classList.toggle('hidden', !on);
   $('#authNotice').classList.toggle('hidden', on);
 }
 
@@ -505,6 +506,7 @@ function applyKey(next) {
     loadFeedback();
     loadDb();
     loadLogs();
+    if (typeof loadConfig === 'function') loadConfig();
   }
 }
 
@@ -518,6 +520,7 @@ if (adminKey) {
   loadFeedback();
   loadDb();
   loadLogs();
+  if (typeof loadConfig === 'function') loadConfig();
 }
 
 $('#saveKeyBtn').addEventListener('click', () => applyKey($('#adminKeyInput').value));
@@ -589,3 +592,45 @@ document.addEventListener('keydown', e => {
 // DB and Logs refresh buttons
 $('#dbRefreshBtn')?.addEventListener('click', loadDb);
 $('#logsRefreshBtn')?.addEventListener('click', loadLogs);
+
+/* ---------- Config ---------------------------------------------- */
+async function loadConfig() {
+  const wheelEl = $('#configWheel');
+  const catalogEl = $('#configCatalog');
+  const tasksEl = $('#configTasks');
+  if (!wheelEl || !catalogEl || !tasksEl) return;
+  
+  try {
+    const data = await adminFetch('/api/admin/config');
+    wheelEl.value = JSON.stringify(data.wheelVariants, null, 2);
+    catalogEl.value = JSON.stringify(data.catalog, null, 2);
+    tasksEl.value = JSON.stringify(data.tasks, null, 2);
+  } catch (err) {
+    reportError(err);
+  }
+}
+
+$('#configForm')?.addEventListener('submit', async e => {
+  e.preventDefault();
+  const submitBtn = e.target.querySelector('button[type="submit"]');
+  const originalText = submitBtn ? submitBtn.textContent : null;
+  if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Saving…'; }
+  
+  try {
+    const wheelVariants = JSON.parse($('#configWheel').value);
+    const catalog = JSON.parse($('#configCatalog').value);
+    const tasks = JSON.parse($('#configTasks').value);
+    
+    await adminFetch('/api/admin/config', {
+      method: 'POST',
+      body: JSON.stringify({ wheelVariants, catalog, tasks })
+    });
+    toast('Configuration saved successfully.', 'success');
+    loadConfig();
+  } catch (err) {
+    reportError(err);
+    toast('Failed to save config. Make sure JSON is valid.', 'error');
+  } finally {
+    if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = originalText; }
+  }
+});
