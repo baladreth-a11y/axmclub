@@ -67,6 +67,7 @@ function setUnlocked(on) {
   $('#dbSection').classList.toggle('hidden', !on);
   $('#logsSection').classList.toggle('hidden', !on);
   $('#configSection').classList.toggle('hidden', !on);
+  $('#chatSection').classList.toggle('hidden', !on);
   $('#authNotice').classList.toggle('hidden', on);
 }
 
@@ -507,6 +508,7 @@ function applyKey(next) {
     loadDb();
     loadLogs();
     if (typeof loadConfig === 'function') loadConfig();
+    if (typeof loadChat === 'function') loadChat();
   }
 }
 
@@ -521,7 +523,52 @@ if (adminKey) {
   loadDb();
   loadLogs();
   if (typeof loadConfig === 'function') loadConfig();
+  if (typeof loadChat === 'function') loadChat();
 }
+
+/* ---------- Chat Moderation ------------------------------------- */
+async function loadChat() {
+  const body = $('#chatBody');
+  if (!body) return;
+  body.innerHTML = '<div class="admin-empty">Loading messages…</div>';
+  try {
+    const { messages } = await adminFetch('/api/chat/public/messages');
+    if (!messages.length) {
+      body.innerHTML = '<div class="admin-empty">No messages in history.</div>';
+      return;
+    }
+    body.innerHTML = messages.reverse().map(m => `
+      <div class="feedback-row" style="padding: 10px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center;">
+        <div style="flex: 1;">
+          <div style="font-weight: 600; font-size: 13px;">${escapeHtml(m.name)} <span class="muted" style="font-weight: 400; font-size: 11px;">· ${escapeHtml(formatDate(m.at))}</span></div>
+          <div style="font-size: 14px; margin-top: 4px;">${escapeHtml(m.text)}</div>
+        </div>
+        <button class="btn btn-ghost chat-delete-btn" data-id="${escapeHtml(m.id)}" style="color: var(--danger);">Delete</button>
+      </div>
+    `).join('');
+  } catch (err) {
+    body.innerHTML = `<div class="admin-empty" style="color: var(--danger);">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+$('#chatRefreshBtn')?.addEventListener('click', loadChat);
+$('#chatBody')?.addEventListener('click', async e => {
+  const btn = e.target.closest('.chat-delete-btn');
+  if (!btn) return;
+  const id = btn.dataset.id;
+  if (!confirm('Delete this message?')) return;
+  
+  try {
+    await adminFetch('/api/admin/chat/delete', {
+      method: 'POST',
+      body: JSON.stringify({ id })
+    });
+    toast('Message deleted.', 'success');
+    loadChat();
+  } catch (err) {
+    reportError(err);
+  }
+});
 
 $('#saveKeyBtn').addEventListener('click', () => applyKey($('#adminKeyInput').value));
 $('#clearKeyBtn').addEventListener('click', () => {

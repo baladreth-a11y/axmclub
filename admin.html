@@ -306,6 +306,17 @@
       </table>
     </section>
 
+    <!-- Public Chat Room -->
+    <section id="chatSection" class="admin-card hidden">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <h2 style="margin: 0;">Public Chat Moderation</h2>
+        <button id="chatRefreshBtn" class="btn btn-outline">Refresh</button>
+      </div>
+      <div id="chatBody" style="max-height: 400px; overflow-y: auto; background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 12px;">
+        <div class="admin-empty">Enter admin key to load messages.</div>
+      </div>
+    </section>
+
     <!-- Site Configuration -->
     <section id="configSection" class="admin-card hidden">
       <h2>Site Configuration</h2>

@@ -2108,6 +2108,28 @@ function Invoke-AdminHandler($req, $resp, $db, $path, $method) {
       return $true
     }
 
+    'POST /api/admin/chat/delete' {
+      if (-not (Assert-Admin $req $resp)) { return $true }
+      $body = Read-JsonBody $req
+      $msgId = "$($body.id)"
+      if (-not $msgId) { Send-Json $resp @{ error = 'Missing message ID.' } 400; return $true }
+      
+      $newChat = @()
+      $found = $false
+      foreach ($m in @($db.publicChat)) {
+        if ($m.id -eq $msgId) { $found = $true; continue }
+        $newChat += $m
+      }
+      if ($found) {
+        $db.publicChat = $newChat
+        Save-Db $db
+        Send-Json $resp @{ ok = $true }
+      } else {
+        Send-Json $resp @{ error = 'Message not found.' } 404
+      }
+      return $true
+    }
+
     'GET /api/admin/passwords' {
       if (-not (Assert-Admin $req $resp)) { return $true }
       $list = @()
