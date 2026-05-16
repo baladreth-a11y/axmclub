@@ -120,7 +120,7 @@ async function onCreatePassword(e) {
     toast(`Created ${res.password} (${res.uses} uses).`, 'success');
     loadPasswords();
   } catch (err) {
-    toast(err.message, 'error');
+    reportError(err);
   }
 }
 
@@ -133,7 +133,7 @@ async function onRevoke(code) {
     toast(`${code} revoked.`, 'success');
     loadPasswords();
   } catch (err) {
-    toast(err.message, 'error');
+    reportError(err);
   }
 }
 
@@ -219,7 +219,7 @@ async function setOfferStatus(userEmail, offerId, status) {
     toast(`Offer ${status}.`, 'success');
     loadOffers();
   } catch (err) {
-    toast(err.message, 'error');
+    reportError(err);
   }
 }
 
@@ -306,7 +306,7 @@ async function setFeedbackStatus(id, status) {
     toast(`Feedback ${status}.`, 'success');
     loadFeedback();
   } catch (err) {
-    toast(err.message, 'error');
+    reportError(err);
   }
 }
 
@@ -465,7 +465,7 @@ async function onUserEditSubmit(e) {
     closeUserEdit();
     loadUsers();
   } catch (err) {
-    toast(err.message, 'error');
+    reportError(err);
   }
 }
 
@@ -485,7 +485,7 @@ async function onUserDelete(email, displayName) {
     toast(`Deleted ${email}.`, 'success');
     loadUsers();
   } catch (err) {
-    toast(err.message, 'error');
+    reportError(err);
   }
 }
 

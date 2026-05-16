@@ -151,6 +151,27 @@ public class AxmParseResult {
   Write-Host "[boot] AxmMultipart Add-Type FAILED: $_" -ForegroundColor Red
 }
 
+# ---------- Helpers ----------
+function ConvertTo-Hashtable {
+  param($obj)
+  if ($null -eq $obj) { return $null }
+  if ($obj -is [hashtable]) { return $obj }
+  if ($obj -is [System.Collections.IDictionary]) {
+    $h = @{}
+    foreach ($k in $obj.Keys) { $h[$k] = ConvertTo-Hashtable $obj[$k] }
+    return $h
+  }
+  if ($obj -is [System.Collections.IEnumerable] -and -not ($obj -is [string])) {
+    return @($obj | ForEach-Object { ConvertTo-Hashtable $_ })
+  }
+  if ($obj -is [PSCustomObject]) {
+    $h = @{}
+    foreach ($p in $obj.PSObject.Properties) { $h[$p.Name] = ConvertTo-Hashtable $p.Value }
+    return $h
+  }
+  return $obj
+}
+
 # ---------- Paths ----------
 $Root    = Split-Path -Parent $MyInvocation.MyCommand.Path
 $DataDir = Join-Path $Root 'data'
@@ -245,26 +266,6 @@ $Script:CallRequestTtlMs      = 30 * 1000         # 30s pending invite TTL
 $Script:CallSignalsPerCall    = 200
 $Script:CallSignalKinds       = @('offer','answer','ice','bye')
 
-# ---------- Helpers ----------
-function ConvertTo-Hashtable {
-  param($obj)
-  if ($null -eq $obj) { return $null }
-  if ($obj -is [hashtable]) { return $obj }
-  if ($obj -is [System.Collections.IDictionary]) {
-    $h = @{}
-    foreach ($k in $obj.Keys) { $h[$k] = ConvertTo-Hashtable $obj[$k] }
-    return $h
-  }
-  if ($obj -is [System.Collections.IEnumerable] -and -not ($obj -is [string])) {
-    return @($obj | ForEach-Object { ConvertTo-Hashtable $_ })
-  }
-  if ($obj -is [PSCustomObject]) {
-    $h = @{}
-    foreach ($p in $obj.PSObject.Properties) { $h[$p.Name] = ConvertTo-Hashtable $p.Value }
-    return $h
-  }
-  return $obj
-}
 
 
 
@@ -669,20 +670,21 @@ function Send-Static($resp, $fullPath) {
   }
 
   # Set caching headers for performance optimization
+  # [DEV] Disabled caching for JS/CSS to ensure updates are picked up.
   $cacheControl = switch ($ext) {
-    '.html' { 'public, max-age=0, must-revalidate' }  # No cache for HTML
-    '.css' { 'public, max-age=31536000, immutable' }  # 1 year for CSS
-    '.js' { 'public, max-age=31536000, immutable' }   # 1 year for JS
-    '.woff' { 'public, max-age=31536000, immutable' } # 1 year for fonts
+    '.html' { 'public, max-age=0, must-revalidate' }
+    '.css' { 'public, max-age=0, must-revalidate' }
+    '.js' { 'public, max-age=0, must-revalidate' }
+    '.woff' { 'public, max-age=31536000, immutable' }
     '.woff2' { 'public, max-age=31536000, immutable' }
-    '.svg' { 'public, max-age=604800' }               # 1 week for SVG
-    '.png' { 'public, max-age=604800' }               # 1 week for images
+    '.svg' { 'public, max-age=604800' }
+    '.png' { 'public, max-age=604800' }
     '.jpg' { 'public, max-age=604800' }
     '.jpeg' { 'public, max-age=604800' }
     '.webp' { 'public, max-age=604800' }
     '.gif' { 'public, max-age=604800' }
     '.ico' { 'public, max-age=604800' }
-    default { 'public, max-age=3600' }                # 1 hour default
+    default { 'public, max-age=3600' }
   }
 
   $bytes = [IO.File]::ReadAllBytes($fullPath)
@@ -3018,8 +3020,8 @@ function Invoke-ChatHandler($req, $resp, $db, $path, $method) {
     }
 
     'GET /api/chat/public/messages' {
-      $u = Assert-Auth $req $resp $db
-      if (-not $u) { return $true }
+      # Publicly accessible. No Assert-Auth here.
+      $u = Get-SessionUser $req $db
       $sinceArg = 0
       if ($req.Url.Query) {
         $q = [System.Web.HttpUtility]::ParseQueryString($req.Url.Query)
@@ -3042,8 +3044,7 @@ function Invoke-ChatHandler($req, $resp, $db, $path, $method) {
     }
 
     'POST /api/chat/public/send' {
-      $u = Assert-Auth $req $resp $db
-      if (-not $u) { return $true }
+      $u = Get-SessionUser $req $db
       $body = Read-JsonBody $req
       $text = ("$($body.text)").Trim()
       if (-not $text) {
@@ -3056,10 +3057,15 @@ function Invoke-ChatHandler($req, $resp, $db, $path, $method) {
       }
       if (-not $db.publicChat) { $db.publicChat = @() }
       $now = NowMs
+      $name = if ($u) { [string]$u.name } else {
+        $sid = Get-SessionId $req
+        if ($sid -and $sid.StartsWith('guest-')) { 'Guest-' + $sid.Substring(6, 4).ToUpper() }
+        else { 'Guest-' + (New-Token).Substring(0, 4).ToUpper() }
+      }
       $msg = @{
         id   = (New-Token)
-        from = [string]$u.email
-        name = if ($u.name) { [string]$u.name } else { [string]$u.email }
+        from = if ($u) { [string]$u.email } else { 'anonymous' }
+        name = $name
         text = $text
         at   = $now
       }

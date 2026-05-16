@@ -49,6 +49,8 @@ export async function refreshLeaderboard() {
 }
 
 export function initLeaderboard() {
+  const list = $('#leaderboardList');
+  if (!list) return;
   render(store.get());
   store.subscribe(render);
   // Refresh when a spin completes (fired by wheel.js).

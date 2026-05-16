@@ -1,7 +1,7 @@
 import { $ } from './util.js';
 import { api } from './api.js';
 import { store } from './store.js';
-import { toast } from './ui.js';
+import { toast , reportError} from './ui.js';
 import { openModal } from './modal.js';
 
 const SEGMENT_COLORS = [
@@ -141,7 +141,7 @@ async function spin() {
     } else if (err.status === 401) {
       openModal('login'); toast('Please sign in to spin.');
     } else {
-      toast(err.message, 'error');
+      reportError(err);
     }
   } finally {
     spinning = false;
@@ -151,9 +151,12 @@ async function spin() {
 
 export function initWheel() {
   canvas = $('#wheel');
+  if (!canvas) return;
   ctx = canvas.getContext('2d');
+  if (!ctx) return;
   drawWheel(0);
-  $('#spinBtn').addEventListener('click', spin);
+  const spinBtn = $('#spinBtn');
+  if (spinBtn) spinBtn.addEventListener('click', spin);
   refreshSpinButton();
   // Keep the cooldown label live.
   setInterval(refreshSpinButton, 60_000);

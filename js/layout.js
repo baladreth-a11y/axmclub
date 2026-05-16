@@ -67,7 +67,7 @@ function navMarkup(activePage) {
             <span class="user-initial" id="userInitial">A</span>
             <span id="userName">Member</span>
           </button>
-          <button id="logoutBtn" class="user-logout" title="Sign out" aria-label="Sign out">⎋</button>
+          <button id="logoutBtn" class="user-logout" title="Sign out" aria-label="Sign out">Sign out</button>
         </div>
       </div>
     </div>`;

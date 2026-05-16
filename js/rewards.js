@@ -1,7 +1,7 @@
 import { $, escapeHtml } from './util.js';
 import { api } from './api.js';
 import { store } from './store.js';
-import { toast } from './ui.js';
+import { toast , reportError} from './ui.js';
 import { openModal } from './modal.js';
 
 function tierBadgeClass(tier) {
@@ -73,19 +73,22 @@ async function redeem(rewardId, reward) {
       openModal('login');
       toast('Sign in to redeem.');
     } else {
-      toast(err.message, 'error');
+      reportError(err);
     }
   }
 }
 
 export function initRewards() {
+  const grid = $('#catalogGrid');
+  if (!grid) return;
+
   // Re-render whenever the store changes (user balance, rewards list).
   store.subscribe(state => {
     if (state.rewards) renderCatalog(state.rewards);
   });
 
   // Event delegation — one listener, keeps working as cards re-render.
-  $('#catalogGrid').addEventListener('click', e => {
+  grid.addEventListener('click', e => {
     const btn = e.target.closest('.catalog-redeem');
     if (!btn || btn.disabled) return;
     const id = btn.dataset.rewardId;

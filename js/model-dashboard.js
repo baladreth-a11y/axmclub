@@ -11,7 +11,7 @@
 import { $, escapeHtml, formatRelative, formatDate } from './util.js';
 import { api } from './api.js';
 import { store } from './store.js';
-import { toast } from './ui.js';
+import { toast , reportError} from './ui.js';
 
 const SOCIAL_KEYS = ['telegram','snap','webcam','fansite'];
 const GENDER_VALUES = ['', 'female', 'male', 'crossdresser', 'transsexual'];
@@ -90,7 +90,7 @@ async function onProfileSubmit(e) {
     fillProfileForm(res.user);
     toast('Profile saved.', 'success');
   } catch (err) {
-    toast(err.message, 'error');
+    reportError(err);
   }
 }
 
@@ -128,7 +128,7 @@ async function onMainPhotoSubmit(e) {
     e.target.reset();
     toast('Main photo uploaded.', 'success');
   } catch (err) {
-    toast(err.message, 'error');
+    reportError(err);
   }
 }
 
@@ -155,7 +155,7 @@ async function onGalleryAddSubmit(e) {
     e.target.reset();
     toast('Photo added to gallery.', 'success');
   } catch (err) {
-    toast(err.message, 'error');
+    reportError(err);
   }
 }
 
@@ -172,7 +172,7 @@ async function onGalleryRemove(url) {
     renderGallery();
     toast('Photo removed.', 'success');
   } catch (err) {
-    toast(err.message, 'error');
+    reportError(err);
   }
 }
 
@@ -187,7 +187,7 @@ async function refreshStats() {
     setText('#statOffersOpen',   s.offersPending);
     setText('#statOffersWon',    s.offersAccepted);
   } catch (err) {
-    toast('Could not load stats: ' + err.message, 'error');
+    reportError(err, 'Could not load stats.');
   }
 }
 
@@ -247,7 +247,7 @@ async function onCreatePassword(e) {
     toast(`Created ${res.password} (${res.uses} uses).`, 'success');
     await Promise.all([refreshPasswords(), refreshStats()]);
   } catch (err) {
-    toast(err.message, 'error');
+    reportError(err);
   }
 }
 
@@ -258,7 +258,7 @@ async function onRevokePassword(code) {
     toast(`${code} revoked.`, 'success');
     await Promise.all([refreshPasswords(), refreshStats()]);
   } catch (err) {
-    toast(err.message, 'error');
+    reportError(err);
   }
 }
 
@@ -310,7 +310,7 @@ async function respondToOffer(userEmail, offerId, status) {
     toast(`Offer ${status}.`, 'success');
     await Promise.all([refreshOffers(), refreshStats()]);
   } catch (err) {
-    toast(err.message, 'error');
+    reportError(err);
   }
 }
 

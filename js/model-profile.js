@@ -7,7 +7,7 @@
 //   * 200              -> render photo, bio, socials, gallery.
 import { $, escapeHtml } from './util.js';
 import { api } from './api.js';
-import { toast } from './ui.js';
+import { toast , reportError} from './ui.js';
 
 const GENDER_LABELS = {
   male:         'Male',
@@ -112,7 +112,7 @@ function renderVerifyPrompt() {
       const res = await api.verifyStart();
       toast(res.alreadyVerified ? 'Already verified.' : 'Verification email sent.', 'success');
     } catch (err) {
-      toast(err.message, 'error');
+      reportError(err);
     }
   });
 }

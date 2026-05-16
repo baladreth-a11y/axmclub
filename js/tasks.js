@@ -1,7 +1,7 @@
 import { $, escapeHtml } from './util.js';
 import { api } from './api.js';
 import { store } from './store.js';
-import { toast } from './ui.js';
+import { toast , reportError} from './ui.js';
 import { openModal } from './modal.js';
 
 function formatDuration(ms) {
@@ -83,15 +83,18 @@ async function claim(taskId) {
       toast(err.message);
       refreshTasks();
     } else {
-      toast(err.message, 'error');
+      reportError(err);
     }
   }
 }
 
 export function initTasks() {
+  const grid = $('#tasksGrid');
+  if (!grid) return;
+
   store.subscribe(render);
 
-  $('#tasksGrid').addEventListener('click', e => {
+  grid.addEventListener('click', e => {
     const btn = e.target.closest('.task-claim');
     if (!btn || btn.disabled) return;
     claim(btn.dataset.taskId);

@@ -9,7 +9,7 @@
 import { $ } from './util.js';
 import { store } from './store.js';
 import { api } from './api.js';
-import { toast } from './ui.js';
+import { toast , reportError} from './ui.js';
 
 let banner = null;
 
@@ -46,7 +46,7 @@ async function resend() {
       toast('Verification email sent. Check your inbox.', 'success');
     }
   } catch (err) {
-    toast(err.message, 'error');
+    reportError(err);
   }
 }
 
