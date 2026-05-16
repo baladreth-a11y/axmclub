@@ -817,6 +817,69 @@ function Send-VerifyEmail([string]$toEmail, [string]$toName, [string]$token, [st
   }
 }
 
+function Send-ResetEmail([string]$toEmail, [string]$toName, [string]$token, [string]$requestHost = '') {
+  $baseUrl = $env:AURUM_BASE_URL
+  if (-not $baseUrl -and $requestHost) {
+    $protocol = if ($requestHost -match 'localhost|127\.0\.0\.1') { 'http' } else { 'https' }
+    $baseUrl = "${protocol}://$requestHost"
+  }
+  if (-not $baseUrl) { $baseUrl = "http://localhost:$Script:Port" }
+  $link = "$baseUrl/?reset_token=$token"
+
+  $smtpHost = $env:AURUM_SMTP_HOST
+  if (-not $smtpHost) {
+    Write-Host "[Password Reset] SMTP disabled. Link for $toEmail : $link" -ForegroundColor Cyan
+    Write-ServerLog("[Password Reset] SMTP disabled. Link for $toEmail : $link")
+    return
+  }
+
+  try {
+    $smtpPort = [int]($env:AURUM_SMTP_PORT)
+    if ($smtpPort -eq 0) { $smtpPort = 587 }
+    $smtpUser = $env:AURUM_SMTP_USER
+    $smtpPass = $env:AURUM_SMTP_PASS
+    $smtpFrom = $env:AURUM_SMTP_FROM
+    if (-not $smtpFrom) {
+      if ($smtpUser -match '@') { $smtpFrom = $smtpUser }
+      else { $smtpFrom = 'noreply@axmclub.com' }
+    }
+
+    $msg = New-Object Net.Mail.MailMessage
+    $msg.From = $smtpFrom
+    $msg.To.Add($toEmail)
+    $msg.Subject = "Reset your AxMclub.com password"
+    $msg.IsBodyHtml = $true
+    $msg.Body = @"
+<html>
+<body style="font-family:sans-serif; line-height:1.5; color:#333;">
+  <h2>Password Reset Request</h2>
+  <p>Hello $toName,</p>
+  <p>We received a request to reset the password for your AxMclub.com account.</p>
+  <p>Please click the button below to choose a new password. This link is valid for 1 hour:</p>
+  <p><a href="$link" style="display:inline-block; padding:10px 20px; background:#d4af6a; color:#fff; text-decoration:none; border-radius:4px; font-weight:bold;">Reset Password</a></p>
+  <p>Or copy and paste this URL into your browser:<br>$link</p>
+  <hr>
+  <p style="font-size:12px; color:#999;">If you did not request a password reset, you can safely ignore this email. Your password will remain unchanged.</p>
+</body>
+</html>
+"@
+    $client = New-Object Net.Mail.SmtpClient($smtpHost, $smtpPort)
+    if ($smtpPort -ne 465) { $client.EnableSsl = $true }
+    $client.Timeout = 10000 # 10s timeout
+    if ($smtpUser -and $smtpPass) {
+      $client.Credentials = New-Object Net.NetworkCredential($smtpUser, $smtpPass)
+    }
+    $client.Send($msg)
+    Write-Host "[Password Reset] Email sent to $toEmail (via $smtpHost)" -ForegroundColor Green
+    Write-ServerLog("[Password Reset] Email sent to $toEmail (via $smtpHost)")
+  } catch {
+    $err = $_.Exception.Message
+    if ($_.Exception.InnerException) { $err += " -> " + $_.Exception.InnerException.Message }
+    Write-Host "WARN: failed to send password reset email to $toEmail via $smtpHost : $err" -ForegroundColor Yellow
+    Write-ServerLog("WARN: failed to send password reset email to $toEmail via $smtpHost : $err")
+  }
+}
+
 function Get-SessionUser($req, $db) {
   $cookie = $req.Cookies['sid']
   $sid = ''
@@ -1050,14 +1113,7 @@ function Invoke-AuthHandler($req, $resp, $db, $path, $method) {
         expires = (NowMs) + 3600000 # 1 hour
       }
       
-      $baseUrl = $env:AURUM_BASE_URL
-      if (-not $baseUrl) { $baseUrl = "http://localhost:$Script:Port" }
-      $link = "$baseUrl/?reset_token=$token"
-      
-      # Mock sending the email for now or write to log
-      Write-Host "[Password Reset] Link for $email : $link" -ForegroundColor Cyan
-      Write-ServerLog("[Password Reset] Link for $email : $link")
-      
+      Send-ResetEmail $email $u.name $token $req.Headers['Host']
       Send-Json $resp @{ ok = $true; message = 'If that email exists, a reset link has been sent.' } 200
       return $true
     }
@@ -1089,7 +1145,8 @@ function Invoke-AuthHandler($req, $resp, $db, $path, $method) {
       
       $salt = New-Salt
       $hash = Get-PasswordHash $newPassword $salt
-      $u.password = $hash
+      $u.pwHash = $hash
+      $u.pwSalt = $salt
       $db.passwordResets.Remove($token)
       Save-Db $db
       
