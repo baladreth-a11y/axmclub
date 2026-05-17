@@ -14,9 +14,6 @@ const GENDER_LABELS = {
 
 function genderBadge(gender, accountType) {
   let badges = '';
-  if (accountType === 'ai') {
-    badges += `<span class="badge badge-ai" style="background: linear-gradient(135deg, #00f2fe, #4facfe); color: #fff; border: none; font-weight: bold; box-shadow: 0 0 10px rgba(0, 242, 254, 0.4); margin-right: var(--space-1);">AI Companion</span> `;
-  }
   if (gender) {
     const safe = String(gender).toLowerCase();
     if (GENDER_LABELS[safe]) {
@@ -54,7 +51,7 @@ function modelCard(m) {
     ? `<p class="muted model-bio">${escapeHtml(m.bio)}</p>`
     : '';
   
-  const cardClass = m.accountType === 'ai' ? 'model-card model-card--ai' : 'model-card';
+  const cardClass = 'model-card';
 
   return `
     <article class="${cardClass}" ${brandStyle(m.brandColor)}>

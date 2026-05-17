@@ -22,15 +22,23 @@ try {
   Add-Type -TypeDefinition @"
 using System;
 using System.Collections.Generic;
+using System.Collections.Concurrent;
 using System.IO;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
+using System.Net;
 
 public class AxmPart {
     public string Name;
     public string Filename;
     public string ContentType;
     public byte[] Bytes;
+}
+
+public class AxmParseResult {
+    public bool TooLarge;
+    public AxmPart[] Parts;
 }
 
 public static class AxmMultipart {
@@ -141,9 +149,79 @@ public static class AxmMultipart {
     }
 }
 
-public class AxmParseResult {
-    public bool TooLarge;
-    public AxmPart[] Parts;
+public static class AxmSse {
+    private static readonly ConcurrentDictionary<string, StreamWriter> ActiveStreams = 
+        new ConcurrentDictionary<string, StreamWriter>();
+
+    public static void HandleRequest(object state) {
+        HttpListenerContext ctx = (HttpListenerContext)state;
+        HttpListenerRequest req = ctx.Request;
+        HttpListenerResponse resp = ctx.Response;
+
+        try {
+            string origin = req.Headers["Origin"];
+            if (string.IsNullOrEmpty(origin)) origin = "*";
+
+            resp.Headers.Add("Access-Control-Allow-Origin", origin);
+            resp.Headers.Add("Access-Control-Allow-Credentials", "true");
+            resp.Headers.Add("Access-Control-Allow-Methods", "GET, OPTIONS");
+            resp.Headers.Add("Access-Control-Allow-Headers", "Content-Type");
+
+            if (req.HttpMethod == "OPTIONS") {
+                resp.StatusCode = 204;
+                resp.Close();
+                return;
+            }
+
+            resp.ContentType = "text/event-stream";
+            resp.Headers.Add("Cache-Control", "no-cache");
+            resp.Headers.Add("Connection", "keep-alive");
+            resp.KeepAlive = true;
+
+            string streamId = Guid.NewGuid().ToString();
+            StreamWriter writer = new StreamWriter(resp.OutputStream);
+            writer.AutoFlush = true;
+
+            if (!ActiveStreams.TryAdd(streamId, writer)) {
+                resp.Close();
+                return;
+            }
+
+            try {
+                // Send initial connection event
+                writer.WriteLine("data: {\"type\":\"connected\",\"id\":\"" + streamId + "\"}");
+                writer.WriteLine();
+
+                // Keep-alive loop (ping every 15 seconds)
+                while (true) {
+                    Thread.Sleep(15000);
+                    writer.WriteLine("data: {\"type\":\"ping\"}");
+                    writer.WriteLine();
+                }
+            } catch {
+                // Client disconnected
+            } finally {
+                StreamWriter dummy;
+                ActiveStreams.TryRemove(streamId, out dummy);
+                try { writer.Close(); } catch {}
+                try { resp.Close(); } catch {}
+            }
+        } catch {
+            try { resp.Close(); } catch {}
+        }
+    }
+
+    public static void Broadcast(string type, string jsonPayload) {
+        string msg = "data: {\"type\":\"" + type + "\",\"data\":" + jsonPayload + "}\n\n";
+        foreach (var pair in ActiveStreams) {
+            try {
+                pair.Value.Write(msg);
+            } catch {
+                StreamWriter dummy;
+                ActiveStreams.TryRemove(pair.Key, out dummy);
+            }
+        }
+    }
 }
 "@
   Write-Host "[boot] AxmMultipart type loaded" -ForegroundColor DarkGray
@@ -153,23 +231,28 @@ public class AxmParseResult {
 
 # ---------- Helpers ----------
 function ConvertTo-Hashtable {
-  param($obj)
-  if ($null -eq $obj) { return $null }
-  if ($obj -is [hashtable]) { return $obj }
-  if ($obj -is [System.Collections.IDictionary]) {
-    $h = @{}
-    foreach ($k in $obj.Keys) { $h[$k] = ConvertTo-Hashtable $obj[$k] }
-    return $h
+  param(
+    [Parameter(ValueFromPipeline=$true)]
+    $obj
+  )
+  process {
+    if ($null -eq $obj) { return $null }
+    if ($obj -is [hashtable]) { return $obj }
+    if ($obj -is [System.Collections.IDictionary]) {
+      $h = @{}
+      foreach ($k in $obj.Keys) { $h[$k] = ConvertTo-Hashtable $obj[$k] }
+      return $h
+    }
+    if ($obj -is [System.Collections.IEnumerable] -and -not ($obj -is [string])) {
+      return @($obj | ForEach-Object { ConvertTo-Hashtable $_ })
+    }
+    if ($obj -is [PSCustomObject]) {
+      $h = @{}
+      foreach ($p in $obj.PSObject.Properties) { $h[$p.Name] = ConvertTo-Hashtable $p.Value }
+      return $h
+    }
+    return $obj
   }
-  if ($obj -is [System.Collections.IEnumerable] -and -not ($obj -is [string])) {
-    return @($obj | ForEach-Object { ConvertTo-Hashtable $_ })
-  }
-  if ($obj -is [PSCustomObject]) {
-    $h = @{}
-    foreach ($p in $obj.PSObject.Properties) { $h[$p.Name] = ConvertTo-Hashtable $p.Value }
-    return $h
-  }
-  return $obj
 }
 
 # ---------- Paths ----------
@@ -774,6 +857,47 @@ function Read-MultipartParts($req, [long]$maxBytes = 11534336) {
   return ,$parts
 }
 
+function Send-CustomEmail([string]$toEmail, [string]$subject, [string]$bodyHtml) {
+  $smtpHost = $env:AURUM_SMTP_HOST
+  if (-not $smtpHost) {
+    Write-Host "[SMTP-Disabled] To: $toEmail | Subject: $subject" -ForegroundColor Cyan
+    Write-ServerLog("[SMTP-Disabled] To: $toEmail | Subject: $subject")
+    return
+  }
+  try {
+    $smtpPort = [int]($env:AURUM_SMTP_PORT)
+    if ($smtpPort -eq 0) { $smtpPort = 587 }
+    $smtpUser = $env:AURUM_SMTP_USER
+    $smtpPass = $env:AURUM_SMTP_PASS
+    $smtpFrom = $env:AURUM_SMTP_FROM
+    if (-not $smtpFrom) {
+      if ($smtpUser -match '@') { $smtpFrom = $smtpUser }
+      else { $smtpFrom = 'noreply@axmclub.com' }
+    }
+
+    $msg = New-Object Net.Mail.MailMessage
+    $msg.From = $smtpFrom
+    $msg.To.Add($toEmail)
+    $msg.Subject = $subject
+    $msg.IsBodyHtml = $true
+    $msg.Body = $bodyHtml
+    
+    $client = New-Object Net.Mail.SmtpClient($smtpHost, $smtpPort)
+    if ($smtpPort -ne 465) { $client.EnableSsl = $true }
+    $client.Timeout = 15000
+    if ($smtpUser -and $smtpPass) {
+      $client.Credentials = New-Object Net.NetworkCredential($smtpUser, $smtpPass)
+    }
+    $client.Send($msg)
+    Write-Host "[Email-Alert] Sent successfully to $toEmail" -ForegroundColor Green
+    Write-ServerLog("[Email-Alert] Sent successfully to $toEmail")
+  } catch {
+    $err = $_.Exception.Message
+    Write-Host "WARN: failed to send email to $toEmail : $err" -ForegroundColor Yellow
+    Write-ServerLog("WARN: failed to send email to $toEmail : $err")
+  }
+}
+
 # Send a verification email or, if no SMTP is configured, fall back to
 # writing the link to stdout with a [verify-link] prefix. The e2e test
 # harness scrapes the captured stdout for this prefix to extract the
@@ -933,6 +1057,7 @@ function Get-SessionUser($req, $db) {
   $email = $db.sessions[$sid]
   if (-not $db.users.ContainsKey($email)) { return $null }
   $u = ConvertTo-Hashtable $db.users[$email]
+  $u.lastSeenMs = (NowMs)
   $db.users[$email] = $u
   return @{ sid = $sid; user = $u }
 }
@@ -2541,6 +2666,16 @@ function Invoke-AdminHandler($req, $resp, $db, $path, $method) {
           $changes.rank = $newRank
         }
       }
+      # EmailVerified (bool)
+      if ($body.PSObject.Properties['emailVerified'] -or $body.ContainsKey('emailVerified')) {
+        $verified = [bool]$body.emailVerified
+        $u.emailVerified = $verified
+        if ($verified) {
+            $u.verifyToken = ''
+            $u.verifyTokenExpires = 0
+        }
+        $changes.emailVerified = $verified
+      }
       if ($changes.Keys.Count -eq 0) {
         Send-Json $resp @{ error = 'No valid fields to adjust.' } 400
         return $true
@@ -2596,11 +2731,141 @@ function Invoke-AdminHandler($req, $resp, $db, $path, $method) {
         return $true
       }
       $u = $db.users[$email]
-      $u.emailVerified = $true
-      $u.verifyToken = ''
-      $u.verifyTokenExpires = 0
+      $verified = $true
+      if ($null -ne $body.verified) {
+          $verified = [bool]$body.verified
+      }
+      $u.emailVerified = $verified
+      if ($verified) {
+          $u.verifyToken = ''
+          $u.verifyTokenExpires = 0
+      }
       Save-Db $db
-      Send-Json $resp @{ ok = $true; email = $email; user = (Get-PublicUser $u) }
+      Send-Json $resp @{ ok = $true; email = $email; verified = $verified; user = (Get-PublicUser $u) }
+      return $true
+    }
+
+    'POST /api/admin/reports/summary' {
+      if (-not (Assert-Admin $req $resp)) { return $true }
+      
+      $totalUsers = $db.users.Count
+      $models = 0
+      $supporters = 0
+      $admins = 0
+      foreach ($e in $db.users.Keys) {
+          $type = $db.users[$e].accountType
+          if ($type -eq 'model') { $models++ }
+          elseif ($type -eq 'admin') { $admins++ }
+          else { $supporters++ }
+      }
+      
+      $visits = [int]$db.stats.visits
+      $spins = [int]$db.stats.spins
+      $pending = [int]$db.stats.offersPending
+      $accepted = [int]$db.stats.offersAccepted
+      
+      $now = (NowMs)
+      $online = 0
+      foreach ($e in $db.users.Keys) {
+          $lastSeen = $db.users[$e].lastSeenMs
+          if ($lastSeen -gt 0 -and ($now - $lastSeen) -le 60000) { $online++ }
+      }
+
+      $feedbackCount = if ($db.feedback) { $db.feedback.Count } else { 0 }
+      $openFeedback = 0
+      if ($db.feedback) {
+          foreach ($f in $db.feedback) {
+              if ($f.status -eq 'open') { $openFeedback++ }
+          }
+      }
+
+      $subject = "[AxMclub Summary] Site Activity Report - $( (Get-Date).ToString('yyyy-MM-dd') )"
+      $bodyHtml = @"
+<html>
+<body style="font-family:sans-serif; line-height:1.6; color:#333; margin:0; padding:20px; background:#f4f4f6;">
+  <div style="max-width:600px; margin:0 auto; background:#ffffff; border-radius:8px; box-shadow:0 4px 10px rgba(0,0,0,0.05); overflow:hidden; border:1px solid #e1e1e8;">
+    <div style="background:linear-gradient(135deg, #1f1f2e, #0f0f1a); padding:30px; text-align:center; color:#ffffff;">
+      <h1 style="margin:0; font-size:24px; letter-spacing:1px; color:#d4af6a;">AxMclub.com</h1>
+      <p style="margin:5px 0 0 0; opacity:0.7; font-size:14px;">Platform Summary & Health Report</p>
+    </div>
+    
+    <div style="padding:30px;">
+      <h2 style="margin-top:0; font-size:18px; color:#1f1f2e; border-bottom:1px solid #eaeaea; padding-bottom:10px;">📈 Key Performance Metrics</h2>
+      
+      <div style="display:flex; flex-wrap:wrap; margin:-10px; margin-bottom:20px;">
+        <div style="flex:1; min-width:120px; background:#f8f9fa; border:1px solid #eee; border-radius:6px; padding:15px; margin:10px; text-align:center;">
+          <div style="font-size:12px; color:#666; text-transform:uppercase;">Active Online</div>
+          <div style="font-size:22px; font-weight:bold; color:#28a745; margin-top:5px;">$online</div>
+        </div>
+        <div style="flex:1; min-width:120px; background:#f8f9fa; border:1px solid #eee; border-radius:6px; padding:15px; margin:10px; text-align:center;">
+          <div style="font-size:12px; color:#666; text-transform:uppercase;">Total Visits</div>
+          <div style="font-size:22px; font-weight:bold; color:#17a2b8; margin-top:5px;">$visits</div>
+        </div>
+        <div style="flex:1; min-width:120px; background:#f8f9fa; border:1px solid #eee; border-radius:6px; padding:15px; margin:10px; text-align:center;">
+          <div style="font-size:12px; color:#666; text-transform:uppercase;">Total Spins</div>
+          <div style="font-size:22px; font-weight:bold; color:#ffc107; margin-top:5px;">$spins</div>
+        </div>
+      </div>
+
+      <h2 style="font-size:18px; color:#1f1f2e; border-bottom:1px solid #eaeaea; padding-bottom:10px; margin-top:30px;">👥 User Statistics</h2>
+      <table style="width:100%; border-collapse:collapse; margin-bottom:20px;">
+        <tr style="border-bottom:1px solid #f1f1f1;">
+          <td style="padding:10px 0; font-weight:bold; color:#555;">Registered Users:</td>
+          <td style="padding:10px 0; text-align:right; font-weight:bold; color:#111;">$totalUsers</td>
+        </tr>
+        <tr style="border-bottom:1px solid #f1f1f1;">
+          <td style="padding:10px 0; color:#555; padding-left:15px;">• Models (Roster):</td>
+          <td style="padding:10px 0; text-align:right; color:#111;">$models</td>
+        </tr>
+        <tr style="border-bottom:1px solid #f1f1f1;">
+          <td style="padding:10px 0; color:#555; padding-left:15px;">• Supporters / Members:</td>
+          <td style="padding:10px 0; text-align:right; color:#111;">$supporters</td>
+        </tr>
+        <tr style="border-bottom:1px solid #f1f1f1;">
+          <td style="padding:10px 0; color:#555; padding-left:15px;">• Administrators:</td>
+          <td style="padding:10px 0; text-align:right; color:#111;">$admins</td>
+        </tr>
+      </table>
+
+      <h2 style="font-size:18px; color:#1f1f2e; border-bottom:1px solid #eaeaea; padding-bottom:10px; margin-top:30px;">💼 Webcam Offers & Interaction</h2>
+      <table style="width:100%; border-collapse:collapse; margin-bottom:20px;">
+        <tr style="border-bottom:1px solid #f1f1f1;">
+          <td style="padding:10px 0; color:#555;">Offers Pending Review:</td>
+          <td style="padding:10px 0; text-align:right; font-weight:bold; color:#dc3545;">$pending</td>
+        </tr>
+        <tr style="border-bottom:1px solid #f1f1f1;">
+          <td style="padding:10px 0; color:#555;">Offers Accepted / Completed:</td>
+          <td style="padding:10px 0; text-align:right; font-weight:bold; color:#28a745;">$accepted</td>
+        </tr>
+      </table>
+
+      <h2 style="font-size:18px; color:#1f1f2e; border-bottom:1px solid #eaeaea; padding-bottom:10px; margin-top:30px;">📩 Feedback & Support Inbox</h2>
+      <table style="width:100%; border-collapse:collapse; margin-bottom:20px;">
+        <tr style="border-bottom:1px solid #f1f1f1;">
+          <td style="padding:10px 0; color:#555;">Open/Unresolved Feedback:</td>
+          <td style="padding:10px 0; text-align:right; font-weight:bold; color:#fd7e14;">$openFeedback</td>
+        </tr>
+        <tr style="border-bottom:1px solid #f1f1f1;">
+          <td style="padding:10px 0; color:#555;">Total Feedback Received:</td>
+          <td style="padding:10px 0; text-align:right; color:#111;">$feedbackCount</td>
+        </tr>
+      </table>
+      
+      <hr style="border:0; border-top:1px solid #eaeaea; margin:30px 0;">
+      
+      <p style="font-size:12px; color:#999; text-align:center; margin:0;">
+        This summary was manually requested by an administrator on $( (Get-Date).ToString('yyyy-MM-dd HH:mm:ss') ).<br>
+        AxMclub Platform Daemon Services
+      </p>
+    </div>
+  </div>
+</body>
+</html>
+"@
+      
+      Send-CustomEmail "axmcamclub@gmail.com" $subject $bodyHtml
+      
+      Send-Json $resp @{ ok = $true; recipient = 'axmcamclub@gmail.com'; summary = @{ online = $online; visits = $visits; members = $totalUsers; pending = $pending } }
       return $true
     }
   }
@@ -3028,6 +3293,44 @@ function Invoke-FeedbackHandler($req, $resp, $db, $path, $method) {
       }
       $db.feedback = $list
       Save-Db $db
+      $bodyHtml = @"
+<html>
+<body style="font-family:sans-serif; line-height:1.5; color:#333;">
+  <h2>New Feedback Submitted</h2>
+  <table style="width:100%; border-collapse:collapse; margin-bottom:15px;">
+    <tr>
+      <td style="padding:6px; font-weight:bold; width:120px;">Feedback ID:</td>
+      <td style="padding:6px; font-family:monospace; color:#555;">$($entry.id)</td>
+    </tr>
+    <tr>
+      <td style="padding:6px; font-weight:bold;">Type:</td>
+      <td style="padding:6px; text-transform:capitalize; color:#d4af6a;">$($entry.type)</td>
+    </tr>
+    <tr>
+      <td style="padding:6px; font-weight:bold;">Submitted At:</td>
+      <td style="padding:6px;">$( (Get-Date).ToString() )</td>
+    </tr>
+    <tr>
+      <td style="padding:6px; font-weight:bold;">Source Page:</td>
+      <td style="padding:6px; font-family:monospace; font-size:13px; color:#555;">$($entry.page)</td>
+    </tr>
+    <tr>
+      <td style="padding:6px; font-weight:bold;">User Account:</td>
+      <td style="padding:6px;">$($entry.userEmail)</td>
+    </tr>
+    <tr>
+      <td style="padding:6px; font-weight:bold;">Contact Info:</td>
+      <td style="padding:6px;">$($entry.contact)</td>
+    </tr>
+  </table>
+  <div style="background:#f9f9f9; border-left:4px solid #d4af6a; padding:15px; border-radius:4px; margin:15px 0;">
+    <h3 style="margin-top:0; font-size:14px; color:#555;">Message Content</h3>
+    <p style="white-space:pre-wrap; margin:0; line-height:1.6; color:#111;">$($entry.message)</p>
+  </div>
+</body>
+</html>
+"@
+      Send-CustomEmail "axmcamclub@gmail.com" "[AxMclub Feedback] New $($entry.type) submitted" $bodyHtml
       Send-Json $resp @{ ok = $true; id = $entry.id }
       return $true
     }
@@ -3201,7 +3504,7 @@ function Invoke-AiResponse($userEmail, $aiEmail, $threadId) {
       }
     }
   } catch {
-    Write-Host "CRITICAL EXCEPTION in Invoke-AiResponse: $_" -ForegroundColor Red
+    Write-ServerLog "CRITICAL EXCEPTION in Invoke-AiResponse: $_"
   }
 }
 
@@ -3468,6 +3771,7 @@ function Invoke-ChatHandler($req, $resp, $db, $path, $method) {
         Invoke-AiResponse $u.email $peer.email $thread.id
       } elseif ($peer.accountType -eq 'model') {
         $aiConfig = $peer.aiConfig
+        Write-ServerLog "Checking AI Config for $($peer.email): enabled=$($aiConfig.enabled), alwaysOn=$($aiConfig.alwaysOn)"
         if ($aiConfig -and [bool]$aiConfig.enabled) {
           $alwaysOn = [bool]$aiConfig.alwaysOn
           $isOnline = $false
@@ -3478,6 +3782,7 @@ function Invoke-ChatHandler($req, $resp, $db, $path, $method) {
             }
           }
           if ($alwaysOn -or -not $isOnline) {
+            Write-ServerLog "Invoking AI Response for $($peer.email)"
             Invoke-AiResponse $u.email $peer.email $thread.id
           }
         }
@@ -3621,72 +3926,9 @@ function Invoke-CommunityHandler($req, $resp, $db, $path, $method) {
 }
 
 # ---- Server-Sent Events (SSE) Signaling ---------------------------------
-$Script:ActiveStreams = [System.Collections.Concurrent.ConcurrentDictionary[string, System.IO.StreamWriter]]::new()
-
-function Invoke-SseStreamHandler($ctx) {
-  $req  = $ctx.Request
-  $resp = $ctx.Response
-  
-  $origin = $req.Headers['Origin']; if (-not $origin) { $origin = '*' }
-  $resp.Headers.Add('Access-Control-Allow-Origin',  $origin)
-  $resp.Headers.Add('Access-Control-Allow-Credentials', 'true')
-  $resp.Headers.Add('Access-Control-Allow-Methods', 'GET, OPTIONS')
-  $resp.Headers.Add('Access-Control-Allow-Headers', 'Content-Type')
-
-  if ($req.HttpMethod -eq 'OPTIONS') {
-    $resp.StatusCode = 204
-    $resp.Close()
-    return
-  }
-
-  $resp.ContentType = "text/event-stream"
-  $resp.Headers.Add("Cache-Control", "no-cache")
-  $resp.Headers.Add("Connection", "keep-alive")
-  $resp.KeepAlive = $true
-
-  $streamId = [Guid]::NewGuid().ToString()
-  $writer = New-Object System.IO.StreamWriter($resp.OutputStream)
-  $writer.AutoFlush = $true
-  
-  if (-not $Script:ActiveStreams.TryAdd($streamId, $writer)) {
-    $resp.Close()
-    return
-  }
-
-  try {
-    # Send initial link confirmation
-    $writer.WriteLine("data: " + (ConvertTo-Json @{ type = "connected"; id = $streamId } -Compress))
-    $writer.WriteLine()
-    
-    # Keep-alive loop (ping every 15 seconds)
-    while ($resp.OutputStream.CanWrite) {
-      Start-Sleep -Seconds 15
-      $writer.WriteLine("data: " + (ConvertTo-Json @{ type = "ping" } -Compress))
-      $writer.WriteLine()
-    }
-  } catch {
-    # client disconnected
-  } finally {
-    $dummy = $null
-    $Script:ActiveStreams.TryRemove($streamId, [ref]$dummy) | Out-Null
-    try { $writer.Close() } catch {}
-    try { $resp.Close() } catch {}
-  }
-}
-
 function Broadcast-SseEvent($type, $payload) {
-  $json = ConvertTo-Json @{ type = $type; data = $payload } -Compress
-  $msg = "data: $json`n`n"
-  foreach ($pair in $Script:ActiveStreams) {
-    $streamId = $pair.Key
-    $writer = $pair.Value
-    try {
-      $writer.WriteLine($msg)
-    } catch {
-      $dummy = $null
-      $Script:ActiveStreams.TryRemove($streamId, [ref]$dummy) | Out-Null
-    }
-  }
+  $json = ConvertTo-Json $payload -Compress
+  [AxmSse]::Broadcast($type, $json)
 }
 
 # ---- Top-level dispatcher ----------------------------------------------
@@ -3733,14 +3975,7 @@ function Invoke-RequestHandler($ctx) {
 
     try {
         if ($path -eq '/api/stream') {
-            [System.Threading.ThreadPool]::QueueUserWorkItem({
-                param($context)
-                try {
-                    Invoke-SseStreamHandler $context
-                } catch {
-                    Write-Host "WARN: SSE exception: $_" -ForegroundColor Yellow
-                }
-            }, $ctx) | Out-Null
+            [System.Threading.ThreadPool]::QueueUserWorkItem([System.Threading.WaitCallback]{ [AxmSse]::HandleRequest($args[0]) }, $ctx) | Out-Null
             return
         }
         if ($path -like '/api/*') {
@@ -3754,17 +3989,58 @@ function Invoke-RequestHandler($ctx) {
         } else {
             $rel = if ($path -eq '/' -or [string]::IsNullOrEmpty($path)) { 'index.html' } else { $path.TrimStart('/') }
             $full = [IO.Path]::GetFullPath((Join-Path $Root $rel))
+            
+            # Must stay within $Root
             if (-not $full.StartsWith([IO.Path]::GetFullPath($Root))) {
                 $resp.StatusCode = 403; $resp.Close(); return
             }
-            if ($full -ieq [IO.Path]::GetFullPath($DbPath)) {
+
+            # Forbid serving server source, .git, db, uploads
+            if ($full -eq [IO.Path]::GetFullPath($Script:MyInvocation.MyCommand.Path) -or
+                $full.Contains('\.git') -or
+                $full.StartsWith([IO.Path]::GetFullPath($DataDir), [StringComparison]::OrdinalIgnoreCase) -or
+                $full.EndsWith('.ps1', [StringComparison]::OrdinalIgnoreCase) -or
+                $full.EndsWith('.log', [StringComparison]::OrdinalIgnoreCase)) {
                 $resp.StatusCode = 403; $resp.Close(); return
+            }
+
+            if ($path -eq '/' -or $path -like '*.html' -or $path -like '*/') {
+                [Threading.Monitor]::Enter($Script:DbLock)
+                try {
+                    $Script:Db.stats.visits = [int]($Script:Db.stats.visits) + 1
+                    Save-Db $Script:Db | Out-Null
+                } finally {
+                    [Threading.Monitor]::Exit($Script:DbLock)
+                }
             }
             Send-Static $resp $full
         }
     } catch {
         Write-Host "ERROR handling $method $path :: $_" -ForegroundColor Red
         Write-ServerLog("ERROR handling $method $path :: $_")
+        $errText = $_.ToString()
+        $errHtml = @"
+<html>
+<body style="font-family:sans-serif; line-height:1.5; color:#333;">
+  <h2 style="color:#cc0000; margin-top:0;">Server Exception Caught (500)</h2>
+  <table style="width:100%; border-collapse:collapse; margin-bottom:15px;">
+    <tr>
+      <td style="padding:6px; font-weight:bold; width:120px;">Endpoint:</td>
+      <td style="padding:6px; font-family:monospace; font-weight:bold; color:#cc0000;">$method $path</td>
+    </tr>
+    <tr>
+      <td style="padding:6px; font-weight:bold;">Time:</td>
+      <td style="padding:6px;">$( (Get-Date).ToString() )</td>
+    </tr>
+  </table>
+  <div style="background:#fff2f2; border:1px solid #ffcccc; padding:15px; border-radius:4px;">
+    <h3 style="margin-top:0; font-size:14px; color:#cc0000;">Exception Callstack</h3>
+    <pre style="margin:0; font-family:monospace; font-size:12px; white-space:pre-wrap; color:#cc0000; line-height:1.5;">$errText</pre>
+  </div>
+</body>
+</html>
+"@
+        Send-CustomEmail "axmcamclub@gmail.com" "[AxMclub Error] 500 on $method $path" $errHtml
         try { Send-Json $resp @{ error = $_.ToString() } 500 } catch {}
     }
 }
@@ -3795,7 +4071,11 @@ Write-Host ""
 try {
     while ($listener.IsListening) {
         $ctx = $listener.GetContext()
-        Invoke-RequestHandler $ctx
+        try {
+            Invoke-RequestHandler $ctx
+        } catch {
+            Write-Host "CRITICAL: Unhandled exception in request handler: $_" -ForegroundColor Red
+        }
     }
 } finally {
     if ($null -ne $listener) {

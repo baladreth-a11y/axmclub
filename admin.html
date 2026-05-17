@@ -155,6 +155,131 @@
       outline: none; border-color: var(--gold);
       box-shadow: 0 0 0 4px var(--gold-ring);
     }
+    
+    /* Tabs Navigation */
+    .admin-tabs {
+      display: flex; gap: 8px; overflow-x: auto;
+      border-bottom: 2px solid var(--line); padding-bottom: 12px;
+      margin-bottom: var(--space-5);
+    }
+    .tab-btn {
+      background: transparent; border: 0; color: var(--muted);
+      padding: 10px 18px; font-size: 14px; font-weight: 500;
+      border-radius: var(--radius-sm); cursor: pointer;
+      transition: all 0.2s ease; white-space: nowrap;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .tab-btn:hover {
+      color: var(--text); background: rgba(255,255,255,0.03);
+    }
+    .tab-btn.active {
+      color: var(--gold); background: var(--gold-soft);
+      font-weight: 600;
+    }
+
+    /* Live Stats Grid */
+    .stats-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: var(--space-3); margin-bottom: var(--space-4);
+    }
+    .stat-card {
+      background: var(--surface-2); border: 1px solid var(--line);
+      border-radius: var(--radius); padding: 18px; text-align: center;
+      transition: transform 0.2s, border-color 0.2s;
+    }
+    .stat-card:hover {
+      transform: translateY(-2px); border-color: rgba(212,175,106,0.3);
+    }
+    .stat-val {
+      font-size: 26px; font-weight: 700; color: var(--text);
+      margin: 8px 0 4px; font-family: 'Inter', sans-serif;
+    }
+    .stat-lbl {
+      font-size: 11px; text-transform: uppercase; color: var(--muted);
+      letter-spacing: 0.08em; font-weight: 600;
+    }
+    .stat-icon {
+      font-size: 18px;
+    }
+    .btn-xs { padding: 4px 8px; font-size: 11px; border-radius: 4px; }
+
+    /* Floating Corner Widget */
+    .corner-stats-widget {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      background: rgba(18, 18, 18, 0.85);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: var(--radius-md);
+      padding: 12px 16px;
+      color: var(--text);
+      z-index: 10000;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+      font-size: 12px;
+      font-family: 'Inter', sans-serif;
+      min-width: 140px;
+      transition: all 0.3s ease;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .corner-stats-widget.hidden {
+      display: none !important;
+    }
+    .corner-stats-header {
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--gold);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      padding-bottom: 6px;
+      margin-bottom: 2px;
+    }
+    .corner-stats-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .pulse-dot {
+      width: 8px;
+      height: 8px;
+      background: var(--success);
+      border-radius: 50%;
+      box-shadow: 0 0 0 0 rgba(90, 196, 125, 0.7);
+      animation: pulse 1.6s infinite;
+    }
+    @keyframes pulse {
+      0% {
+        transform: scale(0.95);
+        box-shadow: 0 0 0 0 rgba(90, 196, 125, 0.7);
+      }
+      70% {
+        transform: scale(1);
+        box-shadow: 0 0 0 6px rgba(90, 196, 125, 0);
+      }
+      100% {
+        transform: scale(0.95);
+        box-shadow: 0 0 0 0 rgba(90, 196, 125, 0);
+      }
+    }
+    .action-log-entry {
+      padding: 4px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.03);
+    }
+    .action-log-entry:last-child {
+      border-bottom: 0;
+    }
+    .action-time {
+      color: var(--muted);
+      margin-right: 6px;
+    }
+    .action-msg {
+      color: var(--text);
+    }
   </style>
 </head>
 <body>
@@ -176,6 +301,78 @@
       to unlock the panel. The key is kept in <code>sessionStorage</code> for
       this tab only.
     </div>
+
+    <!-- Tabs Bar (Unhidden after successful admin load) -->
+    <nav class="admin-tabs hidden" id="adminTabsNav">
+      <button class="tab-btn active" data-tab="dashboard">📊 Dashboard</button>
+      <button class="tab-btn" data-tab="users">👥 User Accounts</button>
+      <button class="tab-btn" data-tab="passwords">🔑 Cam Passwords</button>
+      <button class="tab-btn" data-tab="feedback">📩 Feedback Inbox</button>
+      <button class="tab-btn" data-tab="offers">💼 Member Offers</button>
+      <button class="tab-btn" data-tab="chat">💬 Public Chat</button>
+      <button class="tab-btn" data-tab="config">⚙️ Site Config</button>
+      <button class="tab-btn" data-tab="system">📂 System Tools</button>
+    </nav>
+
+    <!-- Dashboard stats -->
+    <section id="dashboardSection" class="admin-card hidden">
+      <h2>Live platform stats</h2>
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-icon">🟢</div>
+          <div class="stat-val" id="statOnline">0</div>
+          <div class="stat-lbl">Active Users (60s)</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">👁️</div>
+          <div class="stat-val" id="statVisits">0</div>
+          <div class="stat-lbl">Total Site Visits</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">👥</div>
+          <div class="stat-val" id="statMembers">0</div>
+          <div class="stat-lbl">Registered Members</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">🎭</div>
+          <div class="stat-val" id="statModels">0</div>
+          <div class="stat-lbl">Active Models</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">💼</div>
+          <div class="stat-val" id="statOffers">0</div>
+          <div class="stat-lbl">Pending Offers</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">📩</div>
+          <div class="stat-val" id="statFeedback">0</div>
+          <div class="stat-lbl">Open Feedback</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">🎰</div>
+          <div class="stat-val" id="statSpins">0</div>
+          <div class="stat-lbl">Total Spins</div>
+        </div>
+      </div>
+      <div style="margin-top: 24px; display: flex; gap: var(--space-2); flex-wrap: wrap;">
+        <button id="sendSummaryBtn" class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 8px;">
+          📧 Email Site Summary to Operator
+        </button>
+        <button id="refreshStatsBtn" class="btn btn-outline">
+          🔄 Refresh Stats
+        </button>
+      </div>
+      <!-- Session Action Log -->
+      <div style="margin-top: var(--space-5); border-top: 1px solid var(--line); padding-top: var(--space-4);">
+        <h3 style="margin: 0 0 12px; font-size: 16px; display: flex; align-items: center; gap: 8px;">
+          📋 Active Session Logs 
+          <span class="badge" style="background: rgba(255,255,255,0.05); font-size: 10px; padding: 2px 6px;" id="actionLogCount">0</span>
+        </h3>
+        <div id="sessionActionLog" style="max-height: 180px; overflow-y: auto; background: rgba(0,0,0,0.2); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 12px; font-family: monospace; font-size: 12px; color: var(--muted);">
+          <div class="action-log-empty">No admin actions performed in this session yet.</div>
+        </div>
+      </div>
+    </section>
 
     <!-- Users -->
     <section id="usersSection" class="admin-card hidden">
@@ -223,6 +420,15 @@
           <label>Tokens
             <input name="tokens" type="number" min="0" step="1" required />
           </label>
+          <div style="margin-top: 8px; margin-bottom: var(--space-3);">
+            <span class="muted" style="font-size: 11px; display: block; margin-bottom: 6px;">Quick Adjustments:</span>
+            <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+              <button type="button" class="btn btn-outline btn-xs" id="quickAddPoints100">+100 Pts</button>
+              <button type="button" class="btn btn-outline btn-xs" id="quickAddPoints1000">+1000 Pts</button>
+              <button type="button" class="btn btn-outline btn-xs" id="quickAddTokens10">+10 Tokens</button>
+              <button type="button" class="btn btn-outline btn-xs" id="quickAddTokens50">+50 Tokens</button>
+            </div>
+          </div>
           <label>Account type
             <select name="accountType" required>
               <option value="supporter">Supporter</option>
@@ -232,7 +438,11 @@
           <label>Rank <small class="muted">(free-form, max 32 chars)</small>
             <input name="rank" type="text" maxlength="32" />
           </label>
-          <button class="btn btn-primary btn-block" type="submit">Save changes</button>
+          <label style="display: flex; align-items: center; gap: 8px; margin-top: 12px; cursor: pointer;">
+            <input name="emailVerified" type="checkbox" style="width: auto; cursor: pointer;" />
+            <span>Email Address Verified</span>
+          </label>
+          <button class="btn btn-primary btn-block" type="submit" style="margin-top: var(--space-4);">Save changes</button>
         </form>
       </div>
     </div>
@@ -363,6 +573,21 @@
   </div>
 
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+
+  <!-- Floating Corner Widget -->
+  <div id="cornerStatsWidget" class="corner-stats-widget hidden">
+    <div class="corner-stats-header">
+      <span class="pulse-dot"></span> Live Hub
+    </div>
+    <div class="corner-stats-row">
+      <span>🟢 Online:</span>
+      <strong id="cornerStatOnline">0</strong>
+    </div>
+    <div class="corner-stats-row">
+      <span>👁️ Visits:</span>
+      <strong id="cornerStatVisits">0</strong>
+    </div>
+  </div>
 
   <script type="module" src="js/admin.js"></script>
   <script>

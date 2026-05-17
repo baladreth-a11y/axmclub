@@ -1251,7 +1251,7 @@ try {
     $modelsRes = Invoke-RestMethod -Uri ($Base + '/api/models')
     $lunaModel = @($modelsRes.models) | Where-Object { $_.slug -eq 'luna' }
     Check 'Luna AI Companion exists in roster' ($null -ne $lunaModel)
-    Check 'Luna accountType is ai' ($lunaModel.accountType -eq 'ai') ('got ' + $lunaModel.accountType)
+    Check 'Luna accountType is model' ($lunaModel.accountType -eq 'model') ('got ' + $lunaModel.accountType)
 
     $lunaDetail = Invoke-RestMethod -Uri ($Base + '/api/models/luna') -WebSession $aliceSession
     Check 'Luna details load successfully' ($lunaDetail.model.name -eq 'Luna')

@@ -39,6 +39,25 @@ function formatDate(ms) {
   });
 }
 
+function logSessionAction(msg) {
+  const container = $('#sessionActionLog');
+  if (!container) return;
+  const emptyEl = container.querySelector('.action-log-empty');
+  if (emptyEl) emptyEl.remove();
+  
+  const time = new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const entry = document.createElement('div');
+  entry.className = 'action-log-entry';
+  entry.innerHTML = `<span class="action-time">[${time}]</span><span class="action-msg">${escapeHtml(msg)}</span>`;
+  container.prepend(entry);
+  
+  const countEl = $('#actionLogCount');
+  if (countEl) {
+    const current = container.querySelectorAll('.action-log-entry').length;
+    countEl.textContent = current;
+  }
+}
+
 async function adminFetch(path, opts = {}) {
   const res = await fetch(path, {
     ...opts,
@@ -58,17 +77,128 @@ async function adminFetch(path, opts = {}) {
   return data;
 }
 
-/* ---------- UI visibility ---------------------------------------- */
+function reportError(err) {
+  console.error(err);
+  toast(err.message || String(err), 'error');
+}
+
+/* ---------- UI visibility & Navigation -------------------------- */
+let activeTab = 'dashboard';
+
+function switchTab(tabId) {
+  activeTab = tabId;
+  
+  // Highlight active tab button
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.tab === tabId);
+  });
+  
+  // Hide all sections except the active tab's section
+  const cards = [
+    { id: 'dashboardSection', tab: 'dashboard' },
+    { id: 'usersSection', tab: 'users' },
+    { id: 'passwordsSection', tab: 'passwords' },
+    { id: 'feedbackSection', tab: 'feedback' },
+    { id: 'offersSection', tab: 'offers' },
+    { id: 'chatSection', tab: 'chat' },
+    { id: 'configSection', tab: 'config' },
+    { id: 'dbSection', tab: 'system' },
+    { id: 'logsSection', tab: 'system' }
+  ];
+  
+  const unlocked = !!adminKey;
+  cards.forEach(c => {
+    const el = $('#' + c.id);
+    if (el) {
+      el.classList.toggle('hidden', !unlocked || c.tab !== tabId);
+    }
+  });
+  
+  // Trigger fetch for the active tab only
+  if (unlocked) {
+    if (tabId === 'dashboard') loadDashboardStats();
+    else if (tabId === 'users') loadUsers();
+    else if (tabId === 'passwords') loadPasswords();
+    else if (tabId === 'feedback') loadFeedback();
+    else if (tabId === 'offers') loadOffers();
+    else if (tabId === 'chat') loadChat();
+    else if (tabId === 'config') loadConfig();
+    else if (tabId === 'system') { loadDb(); loadLogs(); }
+  }
+}
+
 function setUnlocked(on) {
-  $('#usersSection').classList.toggle('hidden', !on);
-  $('#passwordsSection').classList.toggle('hidden', !on);
-  $('#offersSection').classList.toggle('hidden', !on);
-  const fb = $('#feedbackSection'); if (fb) fb.classList.toggle('hidden', !on);
-  $('#dbSection').classList.toggle('hidden', !on);
-  $('#logsSection').classList.toggle('hidden', !on);
-  $('#configSection').classList.toggle('hidden', !on);
-  $('#chatSection').classList.toggle('hidden', !on);
+  $('#adminTabsNav').classList.toggle('hidden', !on);
   $('#authNotice').classList.toggle('hidden', on);
+  $('#cornerStatsWidget')?.classList.toggle('hidden', !on);
+  if (on) {
+    switchTab(activeTab);
+    if (!setUnlocked._interval) {
+      setUnlocked._interval = setInterval(() => {
+        if (adminKey) {
+          loadDashboardStats();
+        }
+      }, 10000);
+    }
+  } else {
+    const sections = [
+      'dashboardSection', 'usersSection', 'passwordsSection', 'feedbackSection',
+      'offersSection', 'chatSection', 'configSection', 'dbSection', 'logsSection'
+    ];
+    sections.forEach(s => $('#' + s)?.classList.add('hidden'));
+    if (setUnlocked._interval) {
+      clearInterval(setUnlocked._interval);
+      setUnlocked._interval = null;
+    }
+  }
+}
+
+async function loadDashboardStats() {
+  try {
+    const data = await adminFetch('/api/admin/db');
+    if (!data || !data.db) return;
+    const db = data.db;
+    const users = db.users || {};
+
+    // Visits
+    const visits = db.stats?.visits || 0;
+    if ($('#statVisits'))  $('#statVisits').textContent  = Number(visits).toLocaleString();
+    if ($('#cornerStatVisits')) $('#cornerStatVisits').textContent = Number(visits).toLocaleString();
+
+    // Spins
+    const spins = db.stats?.spins || 0;
+    if ($('#statSpins'))   $('#statSpins').textContent   = Number(spins).toLocaleString();
+
+    // Members & Models
+    const userKeys     = Object.keys(users);
+    const totalUsers   = userKeys.length;
+    const totalModels  = userKeys.filter(e => (users[e].accountType || '') === 'model').length;
+    if ($('#statMembers')) $('#statMembers').textContent = totalUsers.toLocaleString();
+    if ($('#statModels'))  $('#statModels').textContent  = totalModels.toLocaleString();
+
+    // Pending offers
+    const offers        = Array.isArray(db.offers) ? db.offers : [];
+    const pendingOffers = offers.filter(o => o.status === 'pending').length;
+    if ($('#statOffers'))  $('#statOffers').textContent  = pendingOffers.toLocaleString();
+
+    // Open feedback
+    const feedback     = Array.isArray(db.feedback) ? db.feedback : [];
+    const openFeedback = feedback.filter(f => (f.status || 'open') === 'open').length;
+    if ($('#statFeedback')) $('#statFeedback').textContent = openFeedback.toLocaleString();
+
+    // Online now (seen in last 60 s)
+    const now = Date.now();
+    let onlineCount = 0;
+    userKeys.forEach(email => {
+      const u = users[email];
+      if (u.lastSeenMs && (now - u.lastSeenMs) <= 60000) onlineCount++;
+    });
+    if ($('#statOnline'))      $('#statOnline').textContent      = onlineCount.toLocaleString();
+    if ($('#cornerStatOnline')) $('#cornerStatOnline').textContent = onlineCount.toLocaleString();
+
+  } catch (err) {
+    console.error('Failed to load stats:', err);
+  }
 }
 
 /* ---------- Passwords ------------------------------------------- */
@@ -120,6 +250,7 @@ async function onCreatePassword(e) {
     e.target.reset();
     e.target.querySelector('input[name="uses"]').value = 10;
     toast(`Created ${res.password} (${res.uses} uses).`, 'success');
+    logSessionAction(`Created password code "${res.password}" with ${res.uses} uses`);
     loadPasswords();
   } catch (err) {
     reportError(err);
@@ -133,6 +264,7 @@ async function onRevoke(code) {
       method: 'POST', body: JSON.stringify({ code })
     });
     toast(`${code} revoked.`, 'success');
+    logSessionAction(`Revoked password code "${code}"`);
     loadPasswords();
   } catch (err) {
     reportError(err);
@@ -219,6 +351,7 @@ async function setOfferStatus(userEmail, offerId, status) {
       body: JSON.stringify({ userEmail, offerId, status })
     });
     toast(`Offer ${status}.`, 'success');
+    logSessionAction(`Marked offer from ${userEmail} as ${status}`);
     loadOffers();
   } catch (err) {
     reportError(err);
@@ -306,6 +439,7 @@ async function setFeedbackStatus(id, status) {
       body: JSON.stringify({ id, status })
     });
     toast(`Feedback ${status}.`, 'success');
+    logSessionAction(`Marked feedback item ${id.slice(0, 8)}... as ${status}`);
     loadFeedback();
   } catch (err) {
     reportError(err);
@@ -358,6 +492,9 @@ function tierClass(tier) {
 }
 
 function userRow(u) {
+  const verifyBtn = !u.emailVerified
+    ? `<button class="btn btn-primary quick-verify-btn" data-email="${escapeHtml(u.email)}" style="background:#28a745; border-color:#28a745; padding: 4px 8px; font-size: 11px; font-weight:600; text-transform:uppercase; letter-spacing:0.05em;">✓ Verify</button>`
+    : '';
   return `
     <tr>
       <td class="muted" style="white-space:nowrap">${escapeHtml(formatDate(u.joined))}</td>
@@ -367,10 +504,21 @@ function userRow(u) {
       </td>
       <td><span class="acct-pill ${escapeHtml(u.accountType)}">${escapeHtml(u.accountType)}</span></td>
       <td><span class="tier-badge ${tierClass(u.tier)}">${escapeHtml(u.tier)}</span></td>
-      <td>${u.points.toLocaleString()}</td>
-      <td>${u.tokens.toLocaleString()}</td>
+      <td>
+        <div style="display:flex; align-items:center; gap:6px;">
+          <span>${u.points.toLocaleString()}</span>
+          <button class="btn btn-outline btn-xs quick-boost-points" data-email="${escapeHtml(u.email)}" style="padding:2px 6px; font-size:10px;">+500</button>
+        </div>
+      </td>
+      <td>
+        <div style="display:flex; align-items:center; gap:6px;">
+          <span>${u.tokens.toLocaleString()}</span>
+          <button class="btn btn-outline btn-xs quick-boost-tokens" data-email="${escapeHtml(u.email)}" style="padding:2px 6px; font-size:10px;">+50</button>
+        </div>
+      </td>
       <td class="muted">${u.streak ? '🔥 ' + u.streak : '—'}</td>
       <td class="admin-row-actions">
+        ${verifyBtn}
         <button class="btn btn-outline edit-user-btn" data-email="${escapeHtml(u.email)}">Edit</button>
         <button class="btn btn-outline delete-user-btn" data-email="${escapeHtml(u.email)}" data-name="${escapeHtml(u.name || u.email)}">Delete</button>
       </td>
@@ -436,6 +584,7 @@ function openUserEdit(email) {
   f.elements['tokens'].value      = u.tokens;
   f.elements['accountType'].value = u.accountType;
   f.elements['rank'].value        = u.rank || '';
+  f.elements['emailVerified'].checked = !!u.emailVerified;
   $('#userEditBackdrop').classList.remove('hidden');
   // Focus the points field by default (most-edited).
   requestAnimationFrame(() => f.elements['points']?.focus());
@@ -451,12 +600,13 @@ async function onUserEditSubmit(e) {
   if (!editingEmail) return;
   const fd = new FormData(e.target);
   const body = {
-    email:       editingEmail,
-    name:        (fd.get('name') || '').toString().trim(),
-    points:      parseInt(fd.get('points'), 10) || 0,
-    tokens:      parseInt(fd.get('tokens'), 10) || 0,
-    accountType: fd.get('accountType'),
-    rank:        (fd.get('rank') || '').toString().trim()
+    email:         editingEmail,
+    name:          (fd.get('name') || '').toString().trim(),
+    points:        parseInt(fd.get('points'), 10) || 0,
+    tokens:        parseInt(fd.get('tokens'), 10) || 0,
+    accountType:   fd.get('accountType'),
+    rank:          (fd.get('rank') || '').toString().trim(),
+    emailVerified: e.target.querySelector('input[name="emailVerified"]').checked
   };
   try {
     await adminFetch('/api/admin/users/adjust', {
@@ -464,6 +614,7 @@ async function onUserEditSubmit(e) {
       body: JSON.stringify(body)
     });
     toast('User updated.', 'success');
+    logSessionAction(`Updated user account fields for ${editingEmail}`);
     closeUserEdit();
     loadUsers();
   } catch (err) {
@@ -485,6 +636,64 @@ async function onUserDelete(email, displayName) {
       body: JSON.stringify({ email })
     });
     toast(`Deleted ${email}.`, 'success');
+    logSessionAction(`Deleted user account for ${email} (${displayName})`);
+    loadUsers();
+  } catch (err) {
+    reportError(err);
+  }
+}
+
+async function onUserQuickVerify(email) {
+  const u = usersCache.find(x => x.email === email);
+  if (!u) return;
+  
+  const body = {
+    email:         u.email,
+    name:          u.name || '',
+    points:        u.points || 0,
+    tokens:        u.tokens || 0,
+    accountType:   u.accountType || 'supporter',
+    rank:          u.rank || '',
+    emailVerified: true
+  };
+  
+  try {
+    await adminFetch('/api/admin/users/adjust', {
+      method: 'POST',
+      body: JSON.stringify(body)
+    });
+    toast(`Successfully verified ${email}!`, 'success');
+    logSessionAction(`Verified email address for ${email}`);
+    loadUsers();
+  } catch (err) {
+    reportError(err);
+  }
+}
+
+async function onUserQuickBoost(email, type, amount) {
+  const u = usersCache.find(x => x.email === email);
+  if (!u) return;
+  
+  const newPoints = type === 'points' ? (u.points + amount) : u.points;
+  const newTokens = type === 'tokens' ? (u.tokens + amount) : u.tokens;
+  
+  const body = {
+    email:         u.email,
+    name:          u.name || '',
+    points:        newPoints,
+    tokens:        newTokens,
+    accountType:   u.accountType || 'supporter',
+    rank:          u.rank || '',
+    emailVerified: !!u.emailVerified
+  };
+  
+  try {
+    await adminFetch('/api/admin/users/adjust', {
+      method: 'POST',
+      body: JSON.stringify(body)
+    });
+    toast(`Boosted ${amount} ${type} to ${email}!`, 'success');
+    logSessionAction(`Boosted ${amount} ${type} for ${email} (New: ${type === 'points' ? newPoints : newTokens})`);
     loadUsers();
   } catch (err) {
     reportError(err);
@@ -500,31 +709,11 @@ function applyKey(next) {
     sessionStorage.removeItem(KEY_SLOT);
   }
   setUnlocked(!!adminKey);
-  if (adminKey) {
-    loadUsers();
-    loadPasswords();
-    loadOffers();
-    loadFeedback();
-    loadDb();
-    loadLogs();
-    if (typeof loadConfig === 'function') loadConfig();
-    if (typeof loadChat === 'function') loadChat();
-  }
 }
 
 /* ---------- Init ------------------------------------------------ */
 $('#adminKeyInput').value = adminKey;
 setUnlocked(!!adminKey);
-if (adminKey) {
-  loadUsers();
-  loadPasswords();
-  loadOffers();
-  loadFeedback();
-  loadDb();
-  loadLogs();
-  if (typeof loadConfig === 'function') loadConfig();
-  if (typeof loadChat === 'function') loadChat();
-}
 
 /* ---------- Chat Moderation ------------------------------------- */
 async function loadChat() {
@@ -619,8 +808,18 @@ $('#usersTierFilter')?.addEventListener('change', renderUsers);
 $('#usersSearch')?.addEventListener('input', renderUsers);
 
 $('#usersBody').addEventListener('click', e => {
+  const verifyBtn = e.target.closest('.quick-verify-btn');
+  if (verifyBtn) { onUserQuickVerify(verifyBtn.dataset.email); return; }
+  
+  const boostPointsBtn = e.target.closest('.quick-boost-points');
+  if (boostPointsBtn) { onUserQuickBoost(boostPointsBtn.dataset.email, 'points', 500); return; }
+  
+  const boostTokensBtn = e.target.closest('.quick-boost-tokens');
+  if (boostTokensBtn) { onUserQuickBoost(boostTokensBtn.dataset.email, 'tokens', 50); return; }
+
   const editBtn = e.target.closest('.edit-user-btn');
   if (editBtn) { openUserEdit(editBtn.dataset.email); return; }
+  
   const delBtn = e.target.closest('.delete-user-btn');
   if (delBtn)  { onUserDelete(delBtn.dataset.email, delBtn.dataset.name); }
 });
@@ -673,6 +872,7 @@ $('#configForm')?.addEventListener('submit', async e => {
       body: JSON.stringify({ wheelVariants, catalog, tasks })
     });
     toast('Configuration saved successfully.', 'success');
+    logSessionAction('Saved updated Site Configuration JSON');
     loadConfig();
   } catch (err) {
     reportError(err);
@@ -680,4 +880,51 @@ $('#configForm')?.addEventListener('submit', async e => {
   } finally {
     if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = originalText; }
   }
+});
+
+// Tab Switching
+$('#adminTabsNav')?.addEventListener('click', e => {
+  const btn = e.target.closest('.tab-btn');
+  if (btn) switchTab(btn.dataset.tab);
+});
+
+// Dashboard Actions
+$('#sendSummaryBtn')?.addEventListener('click', async e => {
+  e.target.disabled = true;
+  const originalText = e.target.textContent;
+  e.target.textContent = 'Sending report…';
+  try {
+    const res = await adminFetch('/api/admin/reports/summary', { method: 'POST' });
+    toast(`Email successfully dispatched to ${res.recipient}!`, 'success');
+  } catch (err) {
+    toast(`Failed to send report: ${err.message}`, 'error');
+  } finally {
+    e.target.disabled = false;
+    e.target.textContent = originalText;
+  }
+});
+
+$('#refreshStatsBtn')?.addEventListener('click', async e => {
+  e.target.disabled = true;
+  await loadDashboardStats();
+  toast('Live stats updated.', 'success');
+  e.target.disabled = false;
+});
+
+// Quick Points / Tokens Adjustments
+$('#quickAddPoints100')?.addEventListener('click', () => {
+  const el = $('#userEditForm').elements['points'];
+  el.value = (parseInt(el.value, 10) || 0) + 100;
+});
+$('#quickAddPoints1000')?.addEventListener('click', () => {
+  const el = $('#userEditForm').elements['points'];
+  el.value = (parseInt(el.value, 10) || 0) + 1000;
+});
+$('#quickAddTokens10')?.addEventListener('click', () => {
+  const el = $('#userEditForm').elements['tokens'];
+  el.value = (parseInt(el.value, 10) || 0) + 10;
+});
+$('#quickAddTokens50')?.addEventListener('click', () => {
+  const el = $('#userEditForm').elements['tokens'];
+  el.value = (parseInt(el.value, 10) || 0) + 50;
 });

@@ -25,7 +25,12 @@ CREATE TABLE IF NOT EXISTS users (
     tasks TEXT,
     redemptions TEXT,
     socials TEXT,
-    aiConfig TEXT
+    aiConfig TEXT,
+    slug TEXT,
+    photoUrl TEXT,
+    lastSeenMs INTEGER,
+    cam2cam INTEGER,
+    dmPolicy TEXT
 );
 CREATE TABLE IF NOT EXISTS sessions (
     token TEXT PRIMARY KEY,
@@ -59,34 +64,77 @@ CREATE TABLE IF NOT EXISTS stats (
     members INTEGER,
     spins INTEGER,
     offersPending INTEGER,
-    offersAccepted INTEGER
+    offersAccepted INTEGER,
+    visits INTEGER DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS config (
     key TEXT PRIMARY KEY,
     value TEXT
 );
-INSERT OR IGNORE INTO stats (id, members, spins, offersPending, offersAccepted) VALUES (1, 0, 0, 0, 0);
-INSERT OR IGNORE INTO users (email, name, pwHash, pwSalt, points, tokens, spins, lastSpinMs, accountType, joinedMs, emailVerified, verifyToken, verifyTokenExpires, bio, brandColor, gender, rank, gallery, tasks, redemptions, socials) 
-VALUES ('luna@example.com', 'Luna', '', '', 0, 0, 0, 0, 'ai', 1700000000000, 1, '', 0, 'Your sweet and helpful AI companion. I am always online and ready to chat. Let''s get to know each other!', '#00f2fe', 'female', 'Platinum', '[]', '{}', '[]', '{}');
 "@
     $cmd = $Script:SqliteConn.CreateCommand()
     $cmd.CommandText = $schema
     $cmd.ExecuteNonQuery() | Out-Null
 
-    # Dynamic Column Migration check: Ensure existing SQLite files get the new aiConfig column
+    # Dynamic Column Migration check: Ensure existing SQLite files get all required columns
     $colsCmd = $Script:SqliteConn.CreateCommand()
     $colsCmd.CommandText = "PRAGMA table_info(users)"
     $reader = $colsCmd.ExecuteReader()
-    $hasAiConfig = $false
+    $existingCols = @{}
     while ($reader.Read()) {
-        if ($reader.GetValue(1) -eq 'aiConfig') { $hasAiConfig = $true }
+        $existingCols[$reader.GetValue(1).ToLowerInvariant()] = $true
     }
     $reader.Close()
-    if (-not $hasAiConfig) {
-        $alterCmd = $Script:SqliteConn.CreateCommand()
-        $alterCmd.CommandText = "ALTER TABLE users ADD COLUMN aiConfig TEXT"
-        $alterCmd.ExecuteNonQuery() | Out-Null
+
+    $requiredCols = @{
+        "aiconfig"   = "TEXT"
+        "slug"       = "TEXT"
+        "photourl"   = "TEXT"
+        "lastseenms" = "INTEGER"
+        "cam2cam"    = "INTEGER"
+        "dmpolicy"   = "TEXT"
     }
+
+    foreach ($col in $requiredCols.Keys) {
+        if (-not $existingCols.ContainsKey($col)) {
+            $colType = $requiredCols[$col]
+            $alterCmd = $Script:SqliteConn.CreateCommand()
+            $alterCmd.CommandText = "ALTER TABLE users ADD COLUMN $col $colType"
+            $alterCmd.ExecuteNonQuery() | Out-Null
+            Write-Host "Migrated users table: Added column $col" -ForegroundColor Cyan
+        }
+    }
+
+    # Verify stats table has the visits column
+    $statsColsCmd = $Script:SqliteConn.CreateCommand()
+    $statsColsCmd.CommandText = "PRAGMA table_info(stats)"
+    $reader = $statsColsCmd.ExecuteReader()
+    $statsCols = @{}
+    while ($reader.Read()) {
+        $statsCols[$reader.GetValue(1).ToLowerInvariant()] = $true
+    }
+    $reader.Close()
+
+    if (-not $statsCols.ContainsKey("visits")) {
+        $alterCmd = $Script:SqliteConn.CreateCommand()
+        $alterCmd.CommandText = "ALTER TABLE stats ADD COLUMN visits INTEGER DEFAULT 0"
+        $alterCmd.ExecuteNonQuery() | Out-Null
+        Write-Host "Migrated stats table: Added column visits" -ForegroundColor Cyan
+    }
+
+    # Now that all tables and columns are guaranteed to exist, execute seeds safely!
+    $seedCmd = $Script:SqliteConn.CreateCommand()
+    $seedCmd.CommandText = @"
+INSERT OR IGNORE INTO stats (id, members, spins, offersPending, offersAccepted, visits) VALUES (1, 0, 0, 0, 0, 0);
+INSERT OR IGNORE INTO users (email, name, pwHash, pwSalt, points, tokens, spins, lastSpinMs, accountType, joinedMs, emailVerified, verifyToken, verifyTokenExpires, bio, brandColor, gender, rank, gallery, tasks, redemptions, socials, aiConfig, slug, photoUrl, lastSeenMs, cam2cam, dmPolicy) 
+VALUES ('luna@example.com', 'Luna', '', '', 0, 0, 0, 0, 'model', 1700000000000, 1, '', 0, 'Your sweet and helpful AI companion. I am always online and ready to chat. Let''s get to know each other!', '#00f2fe', 'female', 'Platinum', '[]', '{}', '[]', '{}', '{"enabled":true,"alwaysOn":true,"cloneName":"Luna","personality":"friendly, welcoming, and suggestively playful"}', 'luna', '', 0, 1, 'open');
+"@
+    $seedCmd.ExecuteNonQuery() | Out-Null
+
+    # Automatically migrate existing Luna to 'model' and enable aiConfig
+    $updCmd = $Script:SqliteConn.CreateCommand()
+    $updCmd.CommandText = 'UPDATE users SET accountType = ''model'', aiConfig = ''{"enabled":true,"alwaysOn":true,"cloneName":"Luna","personality":"friendly, welcoming, and suggestively playful"}'' WHERE email = ''luna@example.com'' AND (accountType = ''ai'' OR aiConfig IS NULL OR aiConfig = ''{}'')'
+    $updCmd.ExecuteNonQuery() | Out-Null
 }
 
 function Open-DbConnection {
@@ -164,13 +212,18 @@ function Get-User($email) {
         redemptions   = if ($r.redemptions -is [System.DBNull]) { @() } else { $r.redemptions | ConvertFrom-Json | ConvertTo-Hashtable }
         socials       = if ($r.socials -is [System.DBNull]) { @{} } else { $r.socials | ConvertFrom-Json | ConvertTo-Hashtable }
         aiConfig      = if ($r.aiConfig -is [System.DBNull]) { @{} } else { $r.aiConfig | ConvertFrom-Json | ConvertTo-Hashtable }
+        slug          = if ($r.slug -is [System.DBNull]) { '' } else { $r.slug }
+        photoUrl      = if ($r.photoUrl -is [System.DBNull]) { '' } else { $r.photoUrl }
+        lastSeenMs    = if ($r.lastSeenMs -is [System.DBNull]) { 0 } else { [long]$r.lastSeenMs }
+        cam2cam       = if ($r.cam2cam -is [System.DBNull]) { $false } else { [bool]$r.cam2cam }
+        dmPolicy      = if ($r.dmPolicy -is [System.DBNull]) { 'open' } else { $r.dmPolicy }
     }
     return $u
 }
 
 function Save-User($u) {
-    $q = "INSERT OR REPLACE INTO users (email, name, pwHash, pwSalt, points, tokens, spins, lastSpinMs, accountType, joinedMs, emailVerified, verifyToken, verifyTokenExpires, bio, brandColor, gender, rank, gallery, tasks, redemptions, socials, aiConfig) 
-          VALUES (@email, @name, @pwHash, @pwSalt, @points, @tokens, @spins, @lastSpinMs, @accountType, @joinedMs, @emailVerified, @verifyToken, @verifyTokenExpires, @bio, @brandColor, @gender, @rank, @gallery, @tasks, @redemptions, @socials, @aiConfig)"
+    $q = "INSERT OR REPLACE INTO users (email, name, pwHash, pwSalt, points, tokens, spins, lastSpinMs, accountType, joinedMs, emailVerified, verifyToken, verifyTokenExpires, bio, brandColor, gender, rank, gallery, tasks, redemptions, socials, aiConfig, slug, photoUrl, lastSeenMs, cam2cam, dmPolicy) 
+          VALUES (@email, @name, @pwHash, @pwSalt, @points, @tokens, @spins, @lastSpinMs, @accountType, @joinedMs, @emailVerified, @verifyToken, @verifyTokenExpires, @bio, @brandColor, @gender, @rank, @gallery, @tasks, @redemptions, @socials, @aiConfig, @slug, @photoUrl, @lastSeenMs, @cam2cam, @dmPolicy)"
     
     $params = @{
         "@email"         = [string]$u.email.ToLowerInvariant()
@@ -195,6 +248,11 @@ function Save-User($u) {
         "@redemptions"   = $(if ($u.redemptions) { ConvertTo-Json @($u.redemptions) -Compress } else { "[]" })
         "@socials"       = $(if ($u.socials) { ConvertTo-Json $u.socials -Compress } else { "{}" })
         "@aiConfig"      = $(if ($u.aiConfig) { ConvertTo-Json $u.aiConfig -Compress } else { "{}" })
+        "@slug"          = [string]$u.slug
+        "@photoUrl"      = [string]$u.photoUrl
+        "@lastSeenMs"    = $(if ($null -ne $u.lastSeenMs) { [long]$u.lastSeenMs } else { 0 })
+        "@cam2cam"       = [int]$(if ($u.cam2cam) { 1 } else { 0 })
+        "@dmPolicy"      = [string]$u.dmPolicy
     }
     Invoke-SqlQuery -query $q -parameters $params | Out-Null
 }
@@ -226,18 +284,19 @@ function Save-Session($s) {
 
 function Get-Stats {
     $rows = Invoke-SqlQuery -query "SELECT * FROM stats WHERE id = 1"
-    if (-not $rows) { return @{ members=0; spins=0; offersPending=0; offersAccepted=0 } }
+    if (-not $rows) { return @{ members=0; spins=0; offersPending=0; offersAccepted=0; visits=0 } }
     return @{
         members = [int]$rows[0].members
         spins = [int]$rows[0].spins
         offersPending = [int]$rows[0].offersPending
         offersAccepted = [int]$rows[0].offersAccepted
+        visits = if ($rows[0].visits -is [System.DBNull]) { 0 } else { [int]$rows[0].visits }
     }
 }
 
 function Save-Stats($s) {
-    $q = "INSERT INTO stats (id, members, spins, offersPending, offersAccepted) VALUES (1, @m, @s, @op, @oa) ON CONFLICT(id) DO UPDATE SET members=excluded.members, spins=excluded.spins, offersPending=excluded.offersPending, offersAccepted=excluded.offersAccepted"
-    Invoke-SqlQuery -query $q -parameters @{"@m"=[int]$s.members; "@s"=[int]$s.spins; "@op"=[int]$s.offersPending; "@oa"=[int]$s.offersAccepted} | Out-Null
+    $q = "INSERT INTO stats (id, members, spins, offersPending, offersAccepted, visits) VALUES (1, @m, @s, @op, @oa, @v) ON CONFLICT(id) DO UPDATE SET members=excluded.members, spins=excluded.spins, offersPending=excluded.offersPending, offersAccepted=excluded.offersAccepted, visits=excluded.visits"
+    Invoke-SqlQuery -query $q -parameters @{"@m"=[int]$s.members; "@s"=[int]$s.spins; "@op"=[int]$s.offersPending; "@oa"=[int]$s.offersAccepted; "@v"=$(if ($null -ne $s.visits) { [int]$s.visits } else { 0 })} | Out-Null
 }
 
 
@@ -324,13 +383,7 @@ function Load-DatabaseToMemory {
     $Script:LastSavedJson.config.Clear()
     
     # Stats
-    $row = Invoke-SqlQuery -query "SELECT * FROM stats WHERE id = 1"
-    if ($row) {
-        $db.stats.members = [int]$row.members
-        $db.stats.spins = [int]$row.spins
-        $db.stats.offersPending = [int]$row.offersPending
-        $db.stats.offersAccepted = [int]$row.offersAccepted
-    }
+    $db.stats = Get-Stats
     $Script:LastSavedJson.stats = Get-ObjectJson $db.stats
     
     # Users
@@ -366,7 +419,7 @@ function Load-DatabaseToMemory {
     # Threads (Hashtable indexed by email_a:email_b)
     $rows = Invoke-SqlQuery -query "SELECT * FROM threads"
     foreach ($r in $rows) {
-        $key = "$($r.email_a):$($r.email_b)"
+        $key = $r.id
         $thread = @{
             id       = $r.id
             a        = $r.email_a
