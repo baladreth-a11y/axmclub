@@ -761,8 +761,8 @@ function Send-VerifyEmail([string]$toEmail, [string]$toName, [string]$token, [st
 
   $smtpHost = $env:AURUM_SMTP_HOST
   if (-not $smtpHost) {
-    Write-Host "[Verify] SMTP disabled. Link for $toEmail : $link" -ForegroundColor Cyan
-    Write-ServerLog("[Verify] SMTP disabled. Link for $toEmail : $link")
+    Write-Host "[verify-link] SMTP disabled. Link for $toEmail : $link" -ForegroundColor Cyan
+    Write-ServerLog("[verify-link] SMTP disabled. Link for $toEmail : $link")
     return
   }
 
@@ -880,28 +880,32 @@ function Send-ResetEmail([string]$toEmail, [string]$toName, [string]$token, [str
   }
 }
 
-function Get-SessionUser($req, $db) {
+function Get-SessionId($req) {
   $cookie = $req.Cookies['sid']
-  $sid = ''
   if ($cookie) {
-    $sid = $cookie.Value
-  } else {
-    $rawCookie = [string]$req.Headers['Cookie']
-    if ($rawCookie) {
-      foreach ($part in ($rawCookie -split ';')) {
-        $bits = $part.Trim() -split '=', 2
-        if ($bits.Count -eq 2 -and $bits[0] -eq 'sid') {
-          $sid = [System.Web.HttpUtility]::UrlDecode($bits[1].Trim().Trim('"'))
-          break
-        }
+    return $cookie.Value
+  }
+  $rawCookie = [string]$req.Headers['Cookie']
+  if ($rawCookie) {
+    foreach ($part in ($rawCookie -split ';')) {
+      $bits = $part.Trim() -split '=', 2
+      if ($bits.Count -eq 2 -and $bits[0] -eq 'sid') {
+        return [System.Web.HttpUtility]::UrlDecode($bits[1].Trim().Trim('"'))
       }
     }
   }
+  return ''
+}
+
+function Get-SessionUser($req, $db) {
+  $sid = Get-SessionId $req
   if (-not $sid) { return $null }
   if (-not $db.sessions.ContainsKey($sid)) { return $null }
   $email = $db.sessions[$sid]
   if (-not $db.users.ContainsKey($email)) { return $null }
-  return @{ sid = $sid; user = $db.users[$email] }
+  $u = ConvertTo-Hashtable $db.users[$email]
+  $db.users[$email] = $u
+  return @{ sid = $sid; user = $u }
 }
 
 function New-SessionCookie($sid) {
@@ -1472,7 +1476,7 @@ function Invoke-EconomyHandler($req, $resp, $db, $path, $method) {
 # both maps and drops any call whose touchedAt is older than the absolute
 # TTL or whose pending invite has aged past the request TTL. Called from
 # the top of every cam call endpoint so callers always see fresh state.
-function Clear-ExpiredCalls {
+function Prune-Calls {
   if (-not $Script:Calls) { $Script:Calls = @{} }
   if (-not $Script:CallSignals) { $Script:CallSignals = @{} }
   $now = NowMs

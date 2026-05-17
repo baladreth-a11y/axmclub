@@ -42,6 +42,11 @@ async function resend() {
     const res = await api.verifyStart();
     if (res.alreadyVerified) {
       toast('Your email is already verified.', 'success');
+      const state = store.get();
+      if (state.user) {
+        state.user.emailVerified = true;
+        store.set({ user: state.user });
+      }
     } else {
       toast('Verification email sent. Check your inbox.', 'success');
     }
@@ -78,4 +83,17 @@ export function initVerifyBanner() {
   flashIfJustVerified();
   render(store.get());
   store.subscribe(render);
+
+  // Background refresh on tab focus to clear unverified banner if they confirmed in another tab
+  window.addEventListener('focus', async () => {
+    const state = store.get();
+    if (state.user && state.user.emailVerified === false) {
+      try {
+        const res = await api.me();
+        if (res.user) {
+          store.set({ user: res.user });
+        }
+      } catch { /* ignore */ }
+    }
+  });
 }

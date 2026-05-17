@@ -1,6 +1,76 @@
 $Script:SqliteConn = $null
 $Script:SqlitePath = Join-Path $DataDir 'database.sqlite'
 
+function Initialize-DatabaseSchema {
+    $schema = @"
+CREATE TABLE IF NOT EXISTS users (
+    email TEXT PRIMARY KEY,
+    name TEXT,
+    pwHash TEXT,
+    pwSalt TEXT,
+    points INTEGER,
+    tokens INTEGER,
+    spins INTEGER,
+    lastSpinMs INTEGER,
+    accountType TEXT,
+    joinedMs INTEGER,
+    emailVerified INTEGER,
+    verifyToken TEXT,
+    verifyTokenExpires INTEGER,
+    bio TEXT,
+    brandColor TEXT,
+    gender TEXT,
+    rank TEXT,
+    gallery TEXT,
+    tasks TEXT,
+    redemptions TEXT,
+    socials TEXT
+);
+CREATE TABLE IF NOT EXISTS sessions (
+    token TEXT PRIMARY KEY,
+    email TEXT,
+    createdAt INTEGER
+);
+CREATE TABLE IF NOT EXISTS threads (
+    id TEXT PRIMARY KEY,
+    email_a TEXT,
+    email_b TEXT,
+    lastMs INTEGER,
+    lastRead TEXT,
+    messages TEXT
+);
+CREATE TABLE IF NOT EXISTS public_chat (
+    id TEXT PRIMARY KEY,
+    from_email TEXT,
+    name TEXT,
+    text TEXT,
+    at INTEGER
+);
+CREATE TABLE IF NOT EXISTS feedback (
+    id TEXT PRIMARY KEY,
+    from_email TEXT,
+    text TEXT,
+    status TEXT,
+    at INTEGER
+);
+CREATE TABLE IF NOT EXISTS stats (
+    id INTEGER PRIMARY KEY,
+    members INTEGER,
+    spins INTEGER,
+    offersPending INTEGER,
+    offersAccepted INTEGER
+);
+CREATE TABLE IF NOT EXISTS config (
+    key TEXT PRIMARY KEY,
+    value TEXT
+);
+INSERT OR IGNORE INTO stats (id, members, spins, offersPending, offersAccepted) VALUES (1, 0, 0, 0, 0);
+"@
+    $cmd = $Script:SqliteConn.CreateCommand()
+    $cmd.CommandText = $schema
+    $cmd.ExecuteNonQuery() | Out-Null
+}
+
 function Open-DbConnection {
     if ($Script:SqliteConn -and $Script:SqliteConn.State -eq 'Open') { return }
     $binDir = Join-Path $Root 'bin'
@@ -14,6 +84,9 @@ function Open-DbConnection {
     $cmd = $Script:SqliteConn.CreateCommand()
     $cmd.CommandText = "PRAGMA journal_mode=WAL;"
     $cmd.ExecuteNonQuery() | Out-Null
+
+    # Ensure schema exists
+    Initialize-DatabaseSchema
 }
 
 function Invoke-SqlQuery($query, $parameters = @{}) {
@@ -57,8 +130,10 @@ function Get-User($email) {
         tokens        = [int]$r.tokens
         spins         = [int]$r.spins
         lastSpinMs    = [long]$r.lastSpinMs
+        lastSpin      = [long]$r.lastSpinMs
         accountType   = if ($r.accountType -is [System.DBNull]) { 'supporter' } else { $r.accountType }
         joinedMs      = [long]$r.joinedMs
+        joined        = [long]$r.joinedMs
         emailVerified = [bool]$r.emailVerified
         verifyToken   = if ($r.verifyToken -is [System.DBNull]) { $null } else { $r.verifyToken }
         verifyTokenExpires = [long]$r.verifyTokenExpires
@@ -86,9 +161,9 @@ function Save-User($u) {
         "@points"        = [int]$u.points
         "@tokens"        = [int]$u.tokens
         "@spins"         = [int]$u.spins
-        "@lastSpinMs"    = [long]$u.lastSpinMs
+        "@lastSpinMs"    = $(if ($null -ne $u.lastSpinMs) { [long]$u.lastSpinMs } elseif ($null -ne $u.lastSpin) { [long]$u.lastSpin } else { 0 })
         "@accountType"   = [string]$u.accountType
-        "@joinedMs"      = [long]$u.joinedMs
+        "@joinedMs"      = $(if ($null -ne $u.joinedMs) { [long]$u.joinedMs } elseif ($null -ne $u.joined) { [long]$u.joined } else { 0 })
         "@emailVerified" = [int]$(if ($u.emailVerified) { 1 } else { 0 })
         "@verifyToken"   = [string]$u.verifyToken
         "@verifyTokenExpires" = [long]$u.verifyTokenExpires
@@ -258,13 +333,20 @@ function Load-DatabaseToMemory {
 }
 
 function Save-MemoryToDatabase($db) {
-    if ($db.users) { foreach ($u in $db.users.Values) { Save-User $u } }
-    if ($db.sessions) { foreach ($s in $db.sessions.Keys) { Save-Session @{token=$s; email=$db.sessions[$s]; createdAt=0} } }
-    if ($db.stats) { Save-Stats $db.stats }
-    if ($db.threads) { foreach ($t in $db.threads.Values) { Save-Thread $t } }
-    if ($db.publicChat) { foreach ($m in $db.publicChat) { Save-RoomMessage $m } }
-    if ($db.feedback) { foreach ($f in $db.feedback) { Save-Feedback $f } }
-    if ($db.config) { Save-Config $db.config }
+    try {
+        Invoke-SqlQuery "BEGIN TRANSACTION;"
+        if ($db.users) { foreach ($u in $db.users.Values) { Save-User $u } }
+        if ($db.sessions) { foreach ($s in $db.sessions.Keys) { Save-Session @{token=$s; email=$db.sessions[$s]; createdAt=0} } }
+        if ($db.stats) { Save-Stats $db.stats }
+        if ($db.threads) { foreach ($t in $db.threads.Values) { Save-Thread $t } }
+        if ($db.publicChat) { foreach ($m in $db.publicChat) { Save-RoomMessage $m } }
+        if ($db.feedback) { foreach ($f in $db.feedback) { Save-Feedback $f } }
+        if ($db.config) { Save-Config $db.config }
+        Invoke-SqlQuery "COMMIT;"
+    } catch {
+        try { Invoke-SqlQuery "ROLLBACK;" } catch {}
+        throw $_
+    }
 }
 
 function Get-Config {

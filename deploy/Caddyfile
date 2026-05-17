@@ -69,14 +69,12 @@ example.com, www.example.com {
         max_size 11MB
     }
 
-    # Long-cache uploaded model photos. Files are content-addressed by
-    # gallery filename + main.<ext>; updates change the URL so cache TTL
-    # can be aggressive.
-    @uploadFiles {
-        path /uploads/*
-    }
-    header @uploadFiles {
-        Cache-Control "public, max-age=86400"
+    # Serve uploaded photos directly from disk using Caddy for massive speed/performance boost
+    # (PowerShell remains responsible for API requests, while Caddy handles heavy static files).
+    handle_path /uploads/* {
+        root * C:\apps\axmclub\uploads
+        file_server
+        header Cache-Control "public, max-age=86400"
     }
 
     reverse_proxy 127.0.0.1:8080 {

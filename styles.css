@@ -2048,7 +2048,7 @@
   .feedback-fab {
     position: fixed;
     right: var(--space-5);
-    bottom: var(--space-5);
+    bottom: calc(var(--space-5) + 50px);
     z-index: 90;
     display: inline-flex; align-items: center; gap: var(--space-2);
     padding: 10px 16px;
@@ -2152,7 +2152,7 @@
   .comm-fab {
     position: fixed;
     left: var(--space-5);
-    bottom: var(--space-5);
+    bottom: calc(var(--space-5) + 50px);
     z-index: 90;
     display: inline-flex; align-items: center; gap: var(--space-2);
     padding: 10px 16px;
@@ -2180,7 +2180,7 @@
   .comm-panel {
     position: fixed;
     left: var(--space-5);
-    bottom: calc(var(--space-5) + 56px);
+    bottom: calc(var(--space-5) + 56px + 50px);
     width: 340px;
     max-width: calc(100vw - 2 * var(--space-5));
     height: min(520px, calc(100vh - 140px));

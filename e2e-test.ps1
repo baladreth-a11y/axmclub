@@ -107,6 +107,8 @@ Log ('Test dir: ' + $TestDir)
 # Copy project into an isolated temp directory so it has a fresh data/ folder.
 New-Item -ItemType Directory -Path $TestDir -Force | Out-Null
 Copy-Item (Join-Path $Root 'server.ps1') (Join-Path $TestDir 'server.ps1')
+Copy-Item (Join-Path $Root 'db-sqlite.ps1') (Join-Path $TestDir 'db-sqlite.ps1')
+Copy-Item -Recurse (Join-Path $Root 'bin') (Join-Path $TestDir 'bin') -ErrorAction SilentlyContinue
 Copy-Item (Join-Path $Root 'styles.css') (Join-Path $TestDir 'styles.css') -ErrorAction SilentlyContinue
 Copy-Item -Recurse (Join-Path $Root 'js') (Join-Path $TestDir 'js') -ErrorAction SilentlyContinue
 # Copy every top-level *.html file so the new dedicated pages
@@ -274,7 +276,10 @@ try {
     Check 'GET / returns 200' ($html.StatusCode -eq 200)
     Check 'GET / contains AxMclub brand' ($html.Content -match 'AxMclub')
     Check 'GET / drops #supporters section'    (-not ($html.Content -match 'id="supporters"'))
-    Check 'GET / contains profile modal view' ($html.Content -match 'data-view="profile"')
+
+    $layoutJs = Invoke-WebRequest -Uri ($Base + '/js/layout.js') -UseBasicParsing
+    Check 'GET /js/layout.js returns 200' ($layoutJs.StatusCode -eq 200)
+    Check 'layout.js contains profile modal view' ($layoutJs.Content -match 'data-view="profile"')
 
     $js = Invoke-WebRequest -Uri ($Base + '/js/main.js') -UseBasicParsing
     Check 'GET /js/main.js returns 200 and JS mime' ($js.StatusCode -eq 200 -and $js.Headers['Content-Type'] -match 'javascript')
@@ -316,9 +321,9 @@ try {
     Check 'GET / drops #camroom section'          (-not ($html.Content -match 'id="camroom"'))
     Check 'GET / drops #tasks section'            (-not ($html.Content -match 'id="tasks"'))
     Check 'GET / drops #party-roster section'     (-not ($html.Content -match 'id="party-roster"'))
-    Check 'GET / has Support & Rewards dropdown'  ($html.Content -match 'nav-dropdown-toggle')
-    Check 'GET / has gate overlay element'        ($html.Content -match 'id="gate"')
-    Check 'GET / has account-type segment'        ($html.Content -match 'class="acct-segment"')
+    Check 'layout.js has dynamic nav players link' ($layoutJs.Content -match 'id="navPlayers"')
+    Check 'layout.js has gate overlay markup'      ($layoutJs.Content -match 'id="gate"')
+    Check 'layout.js has account-type segment'     ($layoutJs.Content -match 'class="acct-segment"')
     # Static cards have been replaced by the dynamic #modelsGrid; the
     # gallery is populated client-side from GET /api/models. Regression
     # guards: the placeholder is present and the legacy hard-coded
@@ -610,7 +615,7 @@ try {
     Check 'GET /js/layout.js returns 200'         ((Invoke-WebRequest -Uri ($Base + '/js/layout.js') -UseBasicParsing).StatusCode -eq 200)
     Check 'GET /js/model-dashboard.js returns 200' ((Invoke-WebRequest -Uri ($Base + '/js/model-dashboard.js') -UseBasicParsing).StatusCode -eq 200)
 
-    Check 'GET / has Model dashboard nav link'    ($html.Content -match 'id="navModelLink"')
+    Check 'layout.js has Model dashboard nav link' ($layoutJs.Content -match 'id="navModelLink"')
 
     Section '20. Model dashboard API'
     # Anonymous (no session) is 401 on every model endpoint.
@@ -814,9 +819,9 @@ try {
     Start-Sleep -Milliseconds 250
     $logText = ''
     if (Test-Path $outLog) { $logText = Get-Content $outLog -Raw -ErrorAction SilentlyContinue }
-    $tokenMatch = [regex]::Match($logText, '\[verify-link\][^?]*\?token=([A-Za-z0-9%]+)')
+    $matches = [regex]::Matches($logText, '\[verify-link\][^?]*\?token=([A-Za-z0-9%]+)')
     $token = ''
-    if ($tokenMatch.Success) { $token = [uri]::UnescapeDataString($tokenMatch.Groups[1].Value) }
+    if ($matches.Count -gt 0) { $token = [uri]::UnescapeDataString($matches[$matches.Count - 1].Groups[1].Value) }
     Check 'Verify link captured from stdout' ($token -and $token.Length -gt 0) ('len=' + $token.Length)
 
     if ($token) {
