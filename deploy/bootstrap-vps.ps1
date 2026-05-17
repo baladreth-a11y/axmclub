@@ -139,7 +139,8 @@ New-Item -ItemType Directory -Force -Path (Join-Path $CaddyRoot 'logs') | Out-Nu
 $caddyTemplate = Get-Content -Raw -Path (Join-Path $InstallPath 'deploy\Caddyfile')
 $caddyConfig   = $caddyTemplate `
     -replace 'example\.com, www\.example\.com',   ($Domain + ', www.' + $Domain) `
-    -replace '127\.0\.0\.1:8080',                 ('127.0.0.1:' + $Port)
+    -replace '127\.0\.0\.1:8080',                 ('127.0.0.1:' + $Port) `
+    -replace 'C:/apps/axmclub/uploads',           (Join-Path $InstallPath 'uploads').Replace('\', '/')
 
 $caddyPath = Join-Path $CaddyRoot 'Caddyfile'
 Set-Content -Path $caddyPath -Value $caddyConfig -Encoding UTF8
