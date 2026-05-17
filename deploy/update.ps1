@@ -38,10 +38,48 @@ function Show-LogTail([string]$path) {
     }
 }
 
-function Assert-Admin {
-    $p = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
-    if (-not $p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-        throw 'Run this script from an elevated PowerShell session (Run as Administrator).'
+function Update-CaddyfileConfig {
+    param(
+        [string]$InstallPath,
+        [string]$CaddyRoot = 'C:\Caddy',
+        [int]$Port = 8080
+    )
+    $liveCaddy = Join-Path $CaddyRoot 'Caddyfile'
+    $backupCaddy = Join-Path $CaddyRoot 'Caddyfile.live'
+    
+    $domainLine = ''
+    $searchFiles = @($liveCaddy, $backupCaddy)
+    foreach ($file in $searchFiles) {
+        if (Test-Path $file) {
+            $content = Get-Content -Raw -Path $file
+            $lines = $content -split "`r?`n"
+            foreach ($line in $lines) {
+                $trimmed = $line.Trim()
+                if ($trimmed -match '^[a-zA-Z0-9\.\-,\s]+\s*\{$' -and $trimmed -ne '{') {
+                    $domainLine = $trimmed.Replace('{', '').Trim()
+                    break
+                }
+            }
+        }
+        if ($domainLine) { break }
+    }
+    
+    if (-not $domainLine) {
+        $domainLine = 'example.com, www.example.com'
+    }
+    
+    $caddyTemplate = Get-Content -Raw -Path (Join-Path $InstallPath 'deploy\Caddyfile')
+    $caddyConfig   = $caddyTemplate `
+        -replace 'example\.com, www\.example\.com',   $domainLine `
+        -replace '127\.0\.0\.1:8080',                 ('127.0.0.1:' + $Port) `
+        -replace 'C:/apps/axmclub/uploads',           (Join-Path $InstallPath 'uploads').Replace('\', '/')
+        
+    Set-Content -Path $liveCaddy -Value $caddyConfig -Encoding UTF8
+    Write-Host "    [Caddy] Synced uploads path in $liveCaddy with actual path: $((Join-Path $InstallPath 'uploads').Replace('\', '/'))" -ForegroundColor Green
+    
+    if (Test-Path $backupCaddy) {
+        Set-Content -Path $backupCaddy -Value $caddyConfig -Encoding UTF8
+        Write-Host "    [Caddy] Synced uploads path in $backupCaddy" -ForegroundColor Green
     }
 }
 
@@ -93,15 +131,14 @@ if ($status -ne 'Running') {
 }
 Ok ("Service '$ServiceName' is " + $status + ".")
 
-if ($RestartCaddy) {
-    Step '3b. Restart caddy'
-    if (Get-Service -Name 'caddy' -ErrorAction SilentlyContinue) {
-        Restart-Service -Name 'caddy' -Force
-        Start-Sleep -Seconds 2
-        Ok ("Service 'caddy' is " + (Get-Service caddy).Status + ".")
-    } else {
-        Info "No 'caddy' service found, skipping."
-    }
+if (Get-Service -Name 'caddy' -ErrorAction SilentlyContinue) {
+    Step '3b. Sync and reload Caddy'
+    Update-CaddyfileConfig -InstallPath $InstallPath -Port $Port
+    Restart-Service -Name 'caddy' -Force
+    Start-Sleep -Seconds 2
+    Ok ("Service 'caddy' is " + (Get-Service caddy).Status + ".")
+} else {
+    Step '3b. Skip Caddy (service not found)'
 }
 
 Step '4. Smoke-test /api/stats'
