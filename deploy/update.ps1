@@ -38,6 +38,13 @@ function Show-LogTail([string]$path) {
     }
 }
 
+function Assert-Admin {
+    $p = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+    if (-not $p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        throw 'Run this script from an elevated PowerShell (Run as Administrator).'
+    }
+}
+
 function Update-CaddyfileConfig {
     param(
         [string]$InstallPath,
