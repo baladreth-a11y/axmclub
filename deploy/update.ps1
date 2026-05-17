@@ -60,11 +60,17 @@ function Update-CaddyfileConfig {
         if (Test-Path $file) {
             $content = Get-Content -Raw -Path $file
             $lines = $content -split "`r?`n"
+            $caddyKeywords = @('servers','global','tls','log','encode','header','handle','route','respond','redir','rewrite','file_server','reverse_proxy','rate_limit','acme_dns','acme_ca','email','admin')
             foreach ($line in $lines) {
                 $trimmed = $line.Trim()
-                if ($trimmed -match '^[a-zA-Z0-9\.\-,\s]+\s*\{$' -and $trimmed -ne '{') {
-                    $domainLine = $trimmed.Replace('{', '').Trim()
-                    break
+                # Must end with '{', must contain a dot (real hostname), must not be a Caddy block keyword
+                if ($trimmed -match '^[a-zA-Z0-9][a-zA-Z0-9\.\-,\s]+\s*\{$') {
+                    $candidate = $trimmed.Replace('{', '').Trim()
+                    $firstToken = ($candidate -split '[,\s]+')[0]
+                    if ($firstToken -match '\.' -and $firstToken -notin $caddyKeywords) {
+                        $domainLine = $candidate
+                        break
+                    }
                 }
             }
         }
