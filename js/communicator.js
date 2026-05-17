@@ -756,3 +756,4 @@ function initSse() {
     sseSource = null;
     setTimeout(initSse, 5000);
   };
+}
