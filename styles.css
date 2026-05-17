@@ -1731,6 +1731,155 @@
     .cam-password-form { flex-direction: column; }
     .hero-stats     { gap: var(--space-5); }
   }
+
+  /* Solana Tipping Modal Overlay */
+  .comm-tip-modal {
+    position: absolute;
+    inset: 0;
+    background: rgba(10, 12, 17, 0.9);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    z-index: 105;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: var(--space-4);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--fast) ease;
+  }
+  .comm-tip-modal:not(.hidden) {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .comm-tip-content {
+    background: linear-gradient(180deg, var(--surface-2), var(--surface-1));
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    padding: var(--space-4);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+  .comm-tip-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 8px;
+  }
+  .comm-tip-header h4 {
+    margin: 0;
+    font-size: 15px;
+    color: var(--gold);
+  }
+  .comm-tip-close {
+    background: transparent;
+    border: none;
+    color: var(--muted);
+    font-size: 20px;
+    cursor: pointer;
+  }
+  .comm-tip-close:hover {
+    color: var(--text);
+  }
+  .comm-tip-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+  .comm-tip-body p {
+    margin: 0;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .comm-tip-presets {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+  .comm-preset-btn {
+    padding: 8px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .comm-preset-btn.is-active {
+    border-color: var(--gold);
+    background: var(--gold-soft);
+    color: var(--gold);
+  }
+  .comm-qr-area {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    padding: var(--space-3) 0;
+    background: rgba(0, 0, 0, 0.25);
+    border-radius: var(--radius-md);
+  }
+  .comm-qr-container {
+    width: 140px;
+    height: 140px;
+    background: white;
+    border-radius: var(--radius-sm);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px;
+    position: relative;
+    overflow: hidden;
+  }
+  .comm-qr-container img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+  .comm-qr-spinner {
+    font-size: 10px;
+    color: #05070c;
+    text-align: center;
+    font-weight: 500;
+  }
+  .comm-pay-deeplink {
+    font-size: 11px;
+    padding: 8px 14px;
+  }
+  .comm-verify-state {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--gold);
+    padding: 6px;
+    border-radius: var(--radius-sm);
+    background: rgba(212, 175, 106, 0.08);
+  }
+  .pulse-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--gold);
+    box-shadow: 0 0 0 0 rgba(212, 175, 106, 0.7);
+    animation: qr-pulse 1.6s infinite;
+  }
+  @keyframes qr-pulse {
+    0% {
+      transform: scale(0.95);
+      box-shadow: 0 0 0 0 rgba(212, 175, 106, 0.7);
+    }
+    70% {
+      transform: scale(1);
+      box-shadow: 0 0 0 6px rgba(212, 175, 106, 0);
+    }
+    100% {
+      transform: scale(0.95);
+      box-shadow: 0 0 0 0 rgba(212, 175, 106, 0);
+    }
+  }
+
   @media (max-width: 480px) {
     .wheel-shell, #wheel { width: 320px; height: 320px; }
     #wheel          { width: 320px !important; height: 320px !important; }
@@ -1772,6 +1921,14 @@
     transform: translateY(-3px);
     border-color: var(--model-brand, var(--gold));
     box-shadow: 0 20px 50px -30px var(--model-brand, var(--gold));
+  }
+  .model-card--ai {
+    border-color: rgba(0, 242, 254, 0.3) !important;
+    box-shadow: 0 0 15px rgba(0, 242, 254, 0.1);
+  }
+  .model-card--ai:hover {
+    border-color: #00f2fe !important;
+    box-shadow: 0 0 25px rgba(0, 242, 254, 0.35), 0 20px 50px -30px rgba(0, 242, 254, 0.5) !important;
   }
   .model-card-link {
     display: block;
@@ -2663,4 +2820,76 @@
 
 @media (min-width: 1200px) {
     .ad-rail { display: block; }
+}
+
+/* ==========================================================================
+   Premium Supporter Tiers, Glow Names & Glassmorphic Badges
+   ========================================================================== */
+
+/* Premium Name Glow */
+.name-glow {
+  background: linear-gradient(90deg, #ff007f, #7c6cff, #00f0ff, #ff007f);
+  background-size: 300% 100%;
+  -webkit-background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+  font-weight: 700;
+  text-shadow: 0 0 10px rgba(124, 108, 255, 0.4);
+  animation: nameGlowShift 4s linear infinite;
+  display: inline-block;
+}
+
+@keyframes nameGlowShift {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 300% 50%; }
+}
+
+/* Sleek Glassmorphic Supporter Badges */
+.badge-supporter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.1rem 0.4rem;
+  font-size: 0.68rem;
+  font-weight: 800;
+  border-radius: 4px;
+  margin-left: 0.35rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  vertical-align: middle;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+  line-height: 1;
+}
+
+.badge-supporter.bronze {
+  background: linear-gradient(135deg, #a75d31, #cf8a5f);
+  color: #fff !important;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.badge-supporter.silver {
+  background: linear-gradient(135deg, #8a8a8a, #e0e0e0);
+  color: #111 !important;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.badge-supporter.gold {
+  background: linear-gradient(135deg, #c5a010, #ffd700);
+  color: #111 !important;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  text-shadow: 0 0 4px rgba(255, 215, 0, 0.3);
+}
+
+.badge-supporter.platinum {
+  background: linear-gradient(135deg, #3a628c, #eaf2fb, #3a628c);
+  background-size: 200% auto;
+  color: #0b172a !important;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  text-shadow: 0 0 4px rgba(234, 242, 251, 0.3);
+  animation: platinumShine 3s linear infinite;
+}
+
+@keyframes platinumShine {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
 }

@@ -1,0 +1,837 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>AxMclub — Stream Alert Overlay</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+  <style>
+    /* Reset & Base variables aligned with AxMclub UI system */
+    :root {
+      --gold: #ffc73b;
+      --gold-glow: rgba(255, 199, 59, 0.4);
+      --purple: #7c6cff;
+      --purple-glow: rgba(124, 108, 255, 0.4);
+      --cyan: #00f3ff;
+      --cyan-glow: rgba(0, 243, 255, 0.4);
+      --bg-dark: rgba(10, 10, 16, 0.85);
+      --border-glow: rgba(255, 255, 255, 0.08);
+      --font-main: 'Outfit', sans-serif;
+      --font-mono: 'Share Tech Mono', monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: var(--font-main);
+      background: transparent; /* Pure transparency for OBS Browser Source */
+      color: #ffffff;
+      overflow: hidden;
+      width: 100vw;
+      height: 100vh;
+      position: relative;
+    }
+
+    /* Transparent main container */
+    #overlay-stage {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none; /* Let clicks pass through to lower layers unless interacting with control panel */
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      padding-top: 10vh;
+    }
+
+    /* Alert Container - Handles multiple cascading alerts cleanly */
+    .alert-container {
+      width: 100%;
+      max-width: 580px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      align-items: center;
+      pointer-events: auto;
+    }
+
+    /* -------------------------------------------------------------
+       Premium Glassmorphic Alert Cards
+       ------------------------------------------------------------- */
+    .alert-card {
+      width: 100%;
+      background: var(--bg-dark);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 2px solid var(--purple);
+      box-shadow: 0 0 25px var(--purple-glow), inset 0 0 15px rgba(255, 255, 255, 0.05);
+      border-radius: 16px;
+      padding: 24px;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      position: relative;
+      overflow: hidden;
+      opacity: 0;
+      transform: translateY(-50px) scale(0.9);
+      animation: alertSlideIn 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+      z-index: 10;
+    }
+
+    .alert-card.animate-out {
+      animation: alertSlideOut 0.5s cubic-bezier(0.6, -0.28, 0.735, 0.045) forwards;
+    }
+
+    /* Neon variations */
+    .alert-card.tip-alert {
+      border-color: var(--cyan);
+      box-shadow: 0 0 25px var(--cyan-glow), inset 0 0 15px rgba(255, 255, 255, 0.05);
+    }
+
+    .alert-card.spin-alert {
+      border-color: var(--gold);
+      box-shadow: 0 0 25px var(--gold-glow), inset 0 0 15px rgba(255, 255, 255, 0.05);
+    }
+
+    .alert-card.welcome-alert {
+      border-color: var(--purple);
+    }
+
+    /* Background sweep sheen animation */
+    .alert-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: -150%;
+      width: 50%;
+      height: 100%;
+      background: linear-gradient(
+        90deg,
+        rgba(255, 255, 255, 0) 0%,
+        rgba(255, 255, 255, 0.15) 50%,
+        rgba(255, 255, 255, 0) 100%
+      );
+      transform: skewX(-25deg);
+      animation: sweepSheen 3s ease-in-out infinite;
+    }
+
+    /* Inner alert elements */
+    .alert-icon {
+      font-size: 42px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 70px;
+      height: 70px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      box-shadow: inset 0 0 10px rgba(255, 255, 255, 0.05);
+      flex-shrink: 0;
+      animation: iconPulse 2s infinite ease-in-out;
+    }
+
+    .alert-content {
+      flex: 1;
+    }
+
+    .alert-category {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+    .tip-alert .alert-category { color: var(--cyan); text-shadow: 0 0 5px var(--cyan-glow); }
+    .spin-alert .alert-category { color: var(--gold); text-shadow: 0 0 5px var(--gold-glow); }
+    .welcome-alert .alert-category { color: var(--purple); text-shadow: 0 0 5px var(--purple-glow); }
+
+    .alert-title {
+      font-size: 26px;
+      font-weight: 800;
+      line-height: 1.2;
+      margin-bottom: 6px;
+      text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+    }
+
+    .alert-subtitle {
+      font-size: 16px;
+      color: rgba(255, 255, 255, 0.8);
+      font-weight: 400;
+    }
+
+    .alert-highlight {
+      font-weight: 800;
+      color: #ffffff;
+      text-shadow: 0 0 8px rgba(255, 255, 255, 0.4);
+    }
+
+    /* Keyframes alerts */
+    @keyframes alertSlideIn {
+      0% {
+        opacity: 0;
+        transform: translateY(-50px) scale(0.9);
+      }
+      70% {
+        transform: translateY(10px) scale(1.02);
+      }
+      100% {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+    }
+
+    @keyframes alertSlideOut {
+      0% {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+      100% {
+        opacity: 0;
+        transform: translateY(-30px) scale(0.9) rotateX(15deg);
+      }
+    }
+
+    @keyframes sweepSheen {
+      0% { left: -150%; }
+      30% { left: 150%; }
+      100% { left: 150%; }
+    }
+
+    @keyframes iconPulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.08); box-shadow: 0 0 15px rgba(255, 255, 255, 0.1); }
+    }
+
+    /* -------------------------------------------------------------
+       Interactive Particle Emitters (Canvas/CSS hybrid)
+       ------------------------------------------------------------- */
+    .particle {
+      position: absolute;
+      font-size: 24px;
+      pointer-events: none;
+      z-index: 100;
+      animation: particleExplosion 1.2s cubic-bezier(0.1, 0.8, 0.3, 1) forwards;
+    }
+
+    @keyframes particleExplosion {
+      0% {
+        transform: translate(0, 0) scale(1) rotate(0deg);
+        opacity: 1;
+      }
+      100% {
+        transform: translate(var(--tx), var(--ty)) scale(0.3) rotate(var(--rot));
+        opacity: 0;
+      }
+    }
+
+    /* -------------------------------------------------------------
+       Collapsible Glassmorphic Streamer Control Panel
+       ------------------------------------------------------------- */
+    #streamer-panel {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      width: 320px;
+      background: rgba(15, 15, 26, 0.7);
+      backdrop-filter: blur(20px) saturate(180%);
+      -webkit-backdrop-filter: blur(20px) saturate(180%);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4), inset 0 0 20px rgba(255, 255, 255, 0.02);
+      border-radius: 16px;
+      z-index: 9999;
+      pointer-events: auto; /* Allow interactions */
+      transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.1);
+      font-size: 13px;
+    }
+
+    #streamer-panel.collapsed {
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      overflow: hidden;
+      background: var(--purple);
+      border-color: rgba(255, 255, 255, 0.2);
+      box-shadow: 0 4px 20px var(--purple-glow);
+    }
+
+    /* Panel Toggle Button */
+    .panel-toggle-btn {
+      position: absolute;
+      top: 0;
+      right: 0;
+      width: 48px;
+      height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: transparent;
+      border: none;
+      color: #ffffff;
+      cursor: pointer;
+      font-size: 20px;
+      transition: transform 0.4s ease;
+      z-index: 10;
+    }
+
+    #streamer-panel.collapsed .panel-toggle-btn {
+      width: 100%;
+      height: 100%;
+      transform: rotate(0);
+    }
+
+    #streamer-panel:not(.collapsed) .panel-toggle-btn {
+      transform: rotate(180deg);
+    }
+
+    /* Panel Body Content */
+    .panel-content {
+      padding: 20px;
+      opacity: 1;
+      transition: opacity 0.3s ease;
+    }
+
+    #streamer-panel.collapsed .panel-content {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      padding-bottom: 10px;
+    }
+
+    .panel-title {
+      font-weight: 600;
+      font-size: 15px;
+      color: var(--gold);
+      letter-spacing: 0.5px;
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 20px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .status-badge.connected {
+      color: #00ff88;
+      border-color: rgba(0, 255, 136, 0.2);
+    }
+
+    .status-badge.disconnected {
+      color: #ff3366;
+      border-color: rgba(255, 51, 102, 0.2);
+    }
+
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+      box-shadow: 0 0 8px currentColor;
+    }
+
+    /* Control Inputs */
+    .panel-row {
+      margin-bottom: 12px;
+    }
+
+    .panel-row label {
+      display: block;
+      color: rgba(255, 255, 255, 0.6);
+      margin-bottom: 5px;
+      font-weight: 500;
+    }
+
+    .volume-slider {
+      width: 100%;
+      accent-color: var(--purple);
+      cursor: pointer;
+    }
+
+    /* Buttons */
+    .test-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 15px;
+    }
+
+    .btn-test {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: #ffffff;
+      padding: 8px 10px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 600;
+      transition: all 0.2s ease;
+      font-size: 12px;
+      text-align: center;
+    }
+
+    .btn-test:hover {
+      background: rgba(255, 255, 255, 0.12);
+      border-color: rgba(255, 255, 255, 0.25);
+    }
+
+    .btn-test-primary {
+      grid-column: span 2;
+      background: var(--purple);
+      border-color: rgba(255, 255, 255, 0.1);
+    }
+
+    .btn-test-primary:hover {
+      background: #8e80ff;
+      box-shadow: 0 0 10px rgba(124, 108, 255, 0.3);
+    }
+
+    .stream-tip {
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.4);
+      text-align: center;
+      margin-top: 12px;
+      line-height: 1.4;
+    }
+
+    /* Daily Goal Progress Bar Styling */
+    .goal-container {
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: min(90vw, 450px);
+      background: rgba(10, 10, 16, 0.75);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), inset 0 0 15px rgba(255, 255, 255, 0.05);
+      border-radius: 12px;
+      padding: 12px 18px;
+      z-index: 1000;
+      transition: opacity 0.3s ease;
+    }
+    .goal-container.hidden {
+      display: none !important;
+    }
+
+    .goal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+
+    .goal-title {
+      font-family: var(--font-main);
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--gold);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      text-shadow: 0 0 8px var(--gold-glow);
+    }
+
+    .goal-progress-text {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      font-weight: 600;
+      color: #fff;
+    }
+
+    .goal-bar-bg {
+      height: 10px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 5px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .goal-bar-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(95deg, var(--purple), var(--cyan), var(--gold));
+      border-radius: 5px;
+      transition: width 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.1);
+      box-shadow: 0 0 10px var(--cyan-glow);
+    }
+
+    /* Compact HUD layout adjustments */
+    body.layout-hud #overlay-stage {
+      justify-content: flex-end;
+      padding-bottom: 80px;
+      padding-top: 0;
+    }
+    
+    body.layout-hud .alert-container {
+      max-width: 450px;
+    }
+
+    body.layout-hud .alert-card {
+      padding: 16px 20px;
+      border-radius: 10px;
+      gap: 14px;
+    }
+
+    body.layout-hud .alert-icon {
+      width: 48px;
+      height: 48px;
+      font-size: 28px;
+    }
+
+    body.layout-hud .alert-title {
+      font-size: 18px;
+    }
+
+    body.layout-hud .alert-subtitle {
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Interactive Daily Goal Thermometer -->
+  <div id="goal-container" class="goal-container hidden">
+    <div class="goal-header">
+      <span class="goal-title">🔥 Daily Token Goal</span>
+      <span class="goal-progress-text"><span id="goal-current">0</span> / <span id="goal-target">1,000</span> Tokens</span>
+    </div>
+    <div class="goal-bar-bg">
+      <div id="goal-bar-fill" class="goal-bar-fill"></div>
+    </div>
+  </div>
+
+  <!-- Overlay Alerts Stage -->
+  <div id="overlay-stage">
+    <div class="alert-container" id="alertContainer"></div>
+  </div>
+
+  <!-- Collapsible Streamer Settings & Testing Panel -->
+  <div id="streamer-panel">
+    <!-- Collapsible Toggle -->
+    <button class="panel-toggle-btn" id="btnTogglePanel" title="Toggle Control Panel">⚙️</button>
+    
+    <div class="panel-content">
+      <div class="panel-header">
+        <span class="panel-title">OBS Overlay Control</span>
+        <span class="status-badge disconnected" id="sseStatusBadge">
+          <span class="status-dot"></span><span id="sseStatusText">Offline</span>
+        </span>
+      </div>
+
+      <!-- Settings -->
+      <div class="panel-row">
+        <div style="display:flex; justify-content:space-between; margin-bottom: 2px;">
+          <label for="volumeSlider">Alert Volume</label>
+          <span id="volumeVal" style="font-family:var(--font-mono); color:var(--purple);">50%</span>
+        </div>
+        <input type="range" id="volumeSlider" min="0" max="100" value="50" class="volume-slider" />
+      </div>
+
+      <!-- Manual Test Trigger Section -->
+      <div class="panel-row" style="margin-top: 18px;">
+        <label>Manual Test Alerts</label>
+        <div class="test-actions">
+          <button class="btn-test btn-test-primary" onclick="triggerTestAlert('tip')">💎 Test Solana Tip Alert</button>
+          <button class="btn-test" onclick="triggerTestAlert('spin')">🎰 Test Spin Win</button>
+          <button class="btn-test" onclick="triggerTestAlert('welcome')">👑 Test Supporter Welcome</button>
+        </div>
+      </div>
+
+      <!-- Instructions helper -->
+      <div class="stream-tip">
+        Control panel is interactive! Minimizes to a subtle gear icon. Clicks outside control panel pass directly through to OBS!
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // -----------------------------------------------------------------
+    // High-End Synthesizer (Web Audio API)
+    // Avoids missing assets or loading problems completely on streamers' OBS.
+    // -----------------------------------------------------------------
+    let audioCtx = null;
+
+    function initAudioContext() {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+    }
+
+    function playSynthSound(type) {
+      try {
+        initAudioContext();
+        const volumeVal = parseFloat(document.getElementById('volumeSlider').value) / 100;
+        if (volumeVal <= 0) return;
+
+        const osc1 = audioCtx.createOscillator();
+        const osc2 = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain();
+
+        osc1.connect(gainNode);
+        osc2.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+
+        const now = audioCtx.currentTime;
+        gainNode.gain.setValueAtTime(0, now);
+        gainNode.gain.linearRampToValueAtTime(volumeVal, now + 0.03);
+
+        if (type === 'tip') {
+          // Elegant electronic crystal chimes
+          osc1.type = 'triangle';
+          osc1.frequency.setValueAtTime(587.33, now); // D5
+          osc1.frequency.exponentialRampToValueAtTime(880.00, now + 0.3); // A5
+
+          osc2.type = 'sine';
+          osc2.frequency.setValueAtTime(1174.66, now); // D6
+          osc2.frequency.exponentialRampToValueAtTime(1760.00, now + 0.35); // A6
+
+          gainNode.gain.exponentialRampToValueAtTime(0.001, now + 1.2);
+          osc1.start(now);
+          osc2.start(now);
+          osc1.stop(now + 1.2);
+          osc2.stop(now + 1.2);
+        } else if (type === 'spin') {
+          // Dynamic cascade of gold coins
+          osc1.type = 'sine';
+          osc2.type = 'triangle';
+          const freqs = [523.25, 659.25, 783.99, 1046.50, 1318.51, 1567.98]; // C5 -> E5 -> G5 -> C6 -> E6 -> G6
+          freqs.forEach((freq, idx) => {
+            const time = now + (idx * 0.08);
+            osc1.frequency.setValueAtTime(freq, time);
+            osc2.frequency.setValueAtTime(freq * 1.5, time);
+            gainNode.gain.setValueAtTime(volumeVal, time);
+            gainNode.gain.exponentialRampToValueAtTime(0.001, time + 0.35);
+          });
+          osc1.start(now);
+          osc2.start(now);
+          osc1.stop(now + 0.85);
+          osc2.stop(now + 0.85);
+        } else {
+          // Warm luxurious electronic welcoming chords (VIP pad theme)
+          osc1.type = 'sine';
+          osc1.frequency.setValueAtTime(329.63, now); // E4
+          osc1.frequency.exponentialRampToValueAtTime(440.00, now + 0.5); // A4
+
+          osc2.type = 'triangle';
+          osc2.frequency.setValueAtTime(392.00, now); // G4
+          osc2.frequency.exponentialRampToValueAtTime(554.37, now + 0.6); // C#5
+
+          gainNode.gain.exponentialRampToValueAtTime(0.001, now + 1.4);
+          osc1.start(now);
+          osc2.start(now);
+          osc1.stop(now + 1.4);
+          osc2.stop(now + 1.4);
+        }
+      } catch (err) {
+        console.warn("Audio Context initialization failed or user blocked interaction:", err);
+      }
+    }
+
+    // -----------------------------------------------------------------
+    // Floating Explosion Particle Effects (GPU accelerated)
+    // Spawns shiny glowing elements dynamically around the landing card.
+    // -----------------------------------------------------------------
+    function spawnAlertExplosionParticles(cardEl) {
+      const rect = cardEl.getBoundingClientRect();
+      const originX = rect.left + rect.width / 2;
+      const originY = rect.top + rect.height / 2;
+      const container = document.getElementById('overlay-stage');
+      const symbols = ['💎', '✨', '🪙', '⭐', '🔥', '🎉'];
+
+      for (let i = 0; i < 24; i++) {
+        const p = document.createElement('div');
+        p.className = 'particle';
+        p.innerText = symbols[Math.floor(Math.random() * symbols.length)];
+        p.style.left = `${originX}px`;
+        p.style.top = `${originY}px`;
+
+        const angle = Math.random() * Math.PI * 2;
+        const distance = Math.random() * 180 + 80;
+        p.style.setProperty('--tx', `${Math.cos(angle) * distance}px`);
+        p.style.setProperty('--ty', `${Math.sin(angle) * distance - 80}px`);
+        p.style.setProperty('--rot', `${Math.random() * 360}deg`);
+
+        container.appendChild(p);
+        setTimeout(() => p.remove(), 1200);
+      }
+    }
+
+    // -----------------------------------------------------------------
+    // Cascade Alert Generator
+    // -----------------------------------------------------------------
+    const activeAlerts = [];
+
+    function pushAlert(type, title, subtitle, extraText = '', icon = '⭐') {
+      const container = document.getElementById('alertContainer');
+      const card = document.createElement('div');
+      card.className = `alert-card ${type}-alert`;
+
+      card.innerHTML = `
+        <div class="alert-icon">${icon}</div>
+        <div class="alert-content">
+          <div class="alert-category">${type === 'welcome' ? 'VIP Status' : type} Alert</div>
+          <div class="alert-title">${title}</div>
+          <div class="alert-subtitle">${subtitle}</div>
+          ${extraText ? `<div style="font-family:var(--font-mono); font-size:12px; color:rgba(255,255,255,0.5); margin-top:8px;">${extraText}</div>` : ''}
+        </div>
+      `;
+
+      container.appendChild(card);
+      
+      // Synthesis Sound Effect
+      playSynthSound(type);
+
+      // Neon Particle Spray
+      setTimeout(() => spawnAlertExplosionParticles(card), 100);
+
+      // Auto Dismiss after 6 seconds
+      setTimeout(() => {
+        card.classList.add('animate-out');
+        setTimeout(() => card.remove(), 500);
+      }, 6000);
+    }
+
+    // Daily goal thermometer state variables
+    let currentGoal = 0;
+    const targetGoal = 1000;
+
+    function updateGoalProgress(amount) {
+      currentGoal = Math.min(currentGoal + amount, targetGoal);
+      const curSpan = document.getElementById('goal-current');
+      if (curSpan) curSpan.innerText = currentGoal.toLocaleString();
+      const pct = (currentGoal / targetGoal) * 100;
+      const fillBar = document.getElementById('goal-bar-fill');
+      if (fillBar) fillBar.style.width = `${pct}%`;
+    }
+
+    // Manual test function for streamer control
+    function triggerTestAlert(type) {
+      initAudioContext();
+      if (type === 'tip') {
+        pushAlert('tip', '0.25 SOL TIPPED!', '💎 <span class="alert-highlight">Alice</span> tipped <span class="alert-highlight">0.25 SOL</span>', 'Received +500 Tokens instantly 🚀', '💎');
+        updateGoalProgress(500);
+      } else if (type === 'spin') {
+        pushAlert('spin', 'ROULETTE SUPER WIN!', '🎰 <span class="alert-highlight">Bob</span> won <span class="alert-highlight">150 Points</span> on the Wheel!', 'Streak: Level Up! 🔥', '🎰');
+      } else {
+        pushAlert('welcome', 'VIP SUPPORTER JOINED!', '👑 <span class="alert-highlight">Clara</span> upgraded to <span class="alert-highlight">Model Tier</span>!', 'Joined axmclub support roster ✨', '👑');
+      }
+    }
+
+    // -----------------------------------------------------------------
+    // Collapsible Settings Panel Logic
+    // -----------------------------------------------------------------
+    const panel = document.getElementById('streamer-panel');
+    const toggleBtn = document.getElementById('btnTogglePanel');
+    const volumeSlider = document.getElementById('volumeSlider');
+    const volumeVal = document.getElementById('volumeVal');
+
+    // Handle collapse toggle
+    toggleBtn.addEventListener('click', () => {
+      panel.classList.toggle('collapsed');
+      initAudioContext(); // Resume audio on first interaction
+    });
+
+    // Update Volume value display
+    volumeSlider.addEventListener('input', (e) => {
+      volumeVal.innerText = `${e.target.value}%`;
+    });
+
+    // -----------------------------------------------------------------
+    // Real-Time Server Event Source Sync (SSE)
+    // -----------------------------------------------------------------
+    const sseBadge = document.getElementById('sseStatusBadge');
+    const sseStatusText = document.getElementById('sseStatusText');
+
+    function connectSSE() {
+      // Connect to server stream endpoint
+      const streamUrl = `${window.location.origin}/api/stream`;
+      const source = new EventSource(streamUrl);
+
+      source.onopen = () => {
+        sseBadge.className = 'status-badge connected';
+        sseStatusText.innerText = 'Connected';
+      };
+
+      source.onerror = () => {
+        sseBadge.className = 'status-badge disconnected';
+        sseStatusText.innerText = 'Offline';
+      };
+
+      // Tipping Alert Listener
+      source.addEventListener('tip', (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          pushAlert(
+            'tip', 
+            `${data.sol} SOL TIPPED!`, 
+            `💎 <span class="alert-highlight">${data.name || 'Anonymous'}</span> tipped <span class="alert-highlight">${data.sol} SOL</span>`, 
+            `Received +${data.tokens} Tokens instantly 🚀`, 
+            '💎'
+          );
+          if (data.tokens) {
+            updateGoalProgress(parseInt(data.tokens) || 0);
+          }
+        } catch (err) {
+          console.error("Failed to parse tip event payload:", err);
+        }
+      });
+
+      // Wheel Spin Alert Listener
+      source.addEventListener('spin-win', (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          // Highlight only wins above 10 pts to avoid spamming overlay
+          if (data.points >= 20) {
+            pushAlert(
+              'spin', 
+              'WHEEL SPIN BIG WIN!', 
+              `🎰 <span class="alert-highlight">${data.name}</span> won <span class="alert-highlight">${data.points} Points</span> on the Wheel!`, 
+              `Segment: ${data.label} 🎉`, 
+              '🎰'
+            );
+          }
+        } catch (err) {
+          console.error("Failed to parse spin-win event payload:", err);
+        }
+      });
+    }
+
+    // Start EventSource connection
+    connectSSE();
+
+    // Parse Layout parameters to activate HUD features
+    const urlParams = new URLSearchParams(window.location.search);
+    const layout = urlParams.get('layout');
+    if (layout === 'hud') {
+      document.body.classList.add('layout-hud');
+      const gCont = document.getElementById('goal-container');
+      if (gCont) gCont.classList.remove('hidden');
+    }
+  </script>
+</body>
+</html>

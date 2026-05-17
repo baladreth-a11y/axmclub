@@ -13,12 +13,14 @@ function rowHtml(row, i, meName) {
   const rank = i + 1;
   const isMe = meName && row.name === meName;
   const initial = (row.name[0] || '?').toUpperCase();
+  const glowClass = row.nameGlow ? 'name-glow' : '';
+  const badgeHtml = row.badge ? `<span class="badge-supporter ${row.badge}">${escapeHtml(row.badge)}</span>` : '';
   return `
     <li class="rank-${rank} ${isMe ? 'is-me' : ''}">
       <span class="lb-rank">${rank}</span>
       <span class="lb-name">
         <span class="lb-avatar">${escapeHtml(initial)}</span>
-        <span class="lb-name-inner">${escapeHtml(row.name)}</span>
+        <span class="lb-name-inner ${glowClass}">${escapeHtml(row.name)}</span>${badgeHtml}
       </span>
       <span class="lb-tier">
         <span class="${tierBadgeClass(row.tier)}">${escapeHtml(row.tier || 'Silver')}</span>

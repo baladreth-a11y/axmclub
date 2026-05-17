@@ -24,7 +24,8 @@ CREATE TABLE IF NOT EXISTS users (
     gallery TEXT,
     tasks TEXT,
     redemptions TEXT,
-    socials TEXT
+    socials TEXT,
+    aiConfig TEXT
 );
 CREATE TABLE IF NOT EXISTS sessions (
     token TEXT PRIMARY KEY,
@@ -65,10 +66,27 @@ CREATE TABLE IF NOT EXISTS config (
     value TEXT
 );
 INSERT OR IGNORE INTO stats (id, members, spins, offersPending, offersAccepted) VALUES (1, 0, 0, 0, 0);
+INSERT OR IGNORE INTO users (email, name, pwHash, pwSalt, points, tokens, spins, lastSpinMs, accountType, joinedMs, emailVerified, verifyToken, verifyTokenExpires, bio, brandColor, gender, rank, gallery, tasks, redemptions, socials) 
+VALUES ('luna@example.com', 'Luna', '', '', 0, 0, 0, 0, 'ai', 1700000000000, 1, '', 0, 'Your sweet and helpful AI companion. I am always online and ready to chat. Let''s get to know each other!', '#00f2fe', 'female', 'Platinum', '[]', '{}', '[]', '{}');
 "@
     $cmd = $Script:SqliteConn.CreateCommand()
     $cmd.CommandText = $schema
     $cmd.ExecuteNonQuery() | Out-Null
+
+    # Dynamic Column Migration check: Ensure existing SQLite files get the new aiConfig column
+    $colsCmd = $Script:SqliteConn.CreateCommand()
+    $colsCmd.CommandText = "PRAGMA table_info(users)"
+    $reader = $colsCmd.ExecuteReader()
+    $hasAiConfig = $false
+    while ($reader.Read()) {
+        if ($reader.GetValue(1) -eq 'aiConfig') { $hasAiConfig = $true }
+    }
+    $reader.Close()
+    if (-not $hasAiConfig) {
+        $alterCmd = $Script:SqliteConn.CreateCommand()
+        $alterCmd.CommandText = "ALTER TABLE users ADD COLUMN aiConfig TEXT"
+        $alterCmd.ExecuteNonQuery() | Out-Null
+    }
 }
 
 function Open-DbConnection {
@@ -145,13 +163,14 @@ function Get-User($email) {
         tasks         = if ($r.tasks -is [System.DBNull]) { @{} } else { $r.tasks | ConvertFrom-Json | ConvertTo-Hashtable }
         redemptions   = if ($r.redemptions -is [System.DBNull]) { @() } else { $r.redemptions | ConvertFrom-Json | ConvertTo-Hashtable }
         socials       = if ($r.socials -is [System.DBNull]) { @{} } else { $r.socials | ConvertFrom-Json | ConvertTo-Hashtable }
+        aiConfig      = if ($r.aiConfig -is [System.DBNull]) { @{} } else { $r.aiConfig | ConvertFrom-Json | ConvertTo-Hashtable }
     }
     return $u
 }
 
 function Save-User($u) {
-    $q = "INSERT OR REPLACE INTO users (email, name, pwHash, pwSalt, points, tokens, spins, lastSpinMs, accountType, joinedMs, emailVerified, verifyToken, verifyTokenExpires, bio, brandColor, gender, rank, gallery, tasks, redemptions, socials) 
-          VALUES (@email, @name, @pwHash, @pwSalt, @points, @tokens, @spins, @lastSpinMs, @accountType, @joinedMs, @emailVerified, @verifyToken, @verifyTokenExpires, @bio, @brandColor, @gender, @rank, @gallery, @tasks, @redemptions, @socials)"
+    $q = "INSERT OR REPLACE INTO users (email, name, pwHash, pwSalt, points, tokens, spins, lastSpinMs, accountType, joinedMs, emailVerified, verifyToken, verifyTokenExpires, bio, brandColor, gender, rank, gallery, tasks, redemptions, socials, aiConfig) 
+          VALUES (@email, @name, @pwHash, @pwSalt, @points, @tokens, @spins, @lastSpinMs, @accountType, @joinedMs, @emailVerified, @verifyToken, @verifyTokenExpires, @bio, @brandColor, @gender, @rank, @gallery, @tasks, @redemptions, @socials, @aiConfig)"
     
     $params = @{
         "@email"         = [string]$u.email.ToLowerInvariant()
@@ -175,6 +194,7 @@ function Save-User($u) {
         "@tasks"         = $(if ($u.tasks) { ConvertTo-Json $u.tasks -Compress } else { "{}" })
         "@redemptions"   = $(if ($u.redemptions) { ConvertTo-Json @($u.redemptions) -Compress } else { "[]" })
         "@socials"       = $(if ($u.socials) { ConvertTo-Json $u.socials -Compress } else { "{}" })
+        "@aiConfig"      = $(if ($u.aiConfig) { ConvertTo-Json $u.aiConfig -Compress } else { "{}" })
     }
     Invoke-SqlQuery -query $q -parameters $params | Out-Null
 }
@@ -278,8 +298,30 @@ function Get-AllThreads() {
 }
 
 
+$Script:LastSavedJson = @{
+    users      = @{}
+    sessions   = @{}
+    stats      = ""
+    threads    = @{}
+    publicChat = @{}
+    feedback   = @{}
+    config     = @{}
+}
+
+function Get-ObjectJson($obj) {
+    if ($null -eq $obj) { return "" }
+    return ConvertTo-Json $obj -Compress -Depth 10
+}
+
 function Load-DatabaseToMemory {
     $db = @{ users=@{}; sessions=@{}; stats=@{members=0;spins=0;offersPending=0;offersAccepted=0}; results=@(); feedback=@(); threads=@{}; publicChat=@(); config=@{} }
+    
+    $Script:LastSavedJson.users.Clear()
+    $Script:LastSavedJson.sessions.Clear()
+    $Script:LastSavedJson.threads.Clear()
+    $Script:LastSavedJson.publicChat.Clear()
+    $Script:LastSavedJson.feedback.Clear()
+    $Script:LastSavedJson.config.Clear()
     
     # Stats
     $row = Invoke-SqlQuery -query "SELECT * FROM stats WHERE id = 1"
@@ -289,31 +331,43 @@ function Load-DatabaseToMemory {
         $db.stats.offersPending = [int]$row.offersPending
         $db.stats.offersAccepted = [int]$row.offersAccepted
     }
+    $Script:LastSavedJson.stats = Get-ObjectJson $db.stats
     
     # Users
     $rows = Invoke-SqlQuery -query "SELECT email FROM users"
     foreach ($r in $rows) {
         $u = Get-User $r.email
-        if ($u) { $db.users[$u.email.ToLowerInvariant()] = $u }
+        if ($u) {
+            $email = $u.email.ToLowerInvariant()
+            $db.users[$email] = $u
+            $Script:LastSavedJson.users[$email] = Get-ObjectJson $u
+        }
     }
     
     # Sessions
     $rows = Invoke-SqlQuery -query "SELECT * FROM sessions"
     foreach ($r in $rows) {
         $db.sessions[$r.token] = $r.email
+        $Script:LastSavedJson.sessions[$r.token] = $r.email
     }
 
     # Public Chat
     $db.publicChat = Get-RoomMessages 0
+    foreach ($m in $db.publicChat) {
+        $Script:LastSavedJson.publicChat[$m.id] = Get-ObjectJson $m
+    }
     
     # Feedback
     $db.feedback = Get-Feedback
+    foreach ($f in $db.feedback) {
+        $Script:LastSavedJson.feedback[$f.id] = Get-ObjectJson $f
+    }
     
     # Threads (Hashtable indexed by email_a:email_b)
     $rows = Invoke-SqlQuery -query "SELECT * FROM threads"
     foreach ($r in $rows) {
         $key = "$($r.email_a):$($r.email_b)"
-        $db.threads[$key] = @{
+        $thread = @{
             id       = $r.id
             a        = $r.email_a
             b        = $r.email_b
@@ -321,12 +375,16 @@ function Load-DatabaseToMemory {
             lastRead = if ($r.lastRead -is [System.DBNull]) { @{} } else { $r.lastRead | ConvertFrom-Json | ConvertTo-Hashtable }
             messages = if ($r.messages -is [System.DBNull]) { @() } else { $r.messages | ConvertFrom-Json | ConvertTo-Hashtable }
         }
+        $db.threads[$key] = $thread
+        $Script:LastSavedJson.threads[$key] = Get-ObjectJson $thread
     }
 
     # Config
     $rows = Invoke-SqlQuery -query "SELECT * FROM config"
     foreach ($r in $rows) {
-        $db.config[$r.key] = $r.value | ConvertFrom-Json | ConvertTo-Hashtable
+        $val = $r.value | ConvertFrom-Json | ConvertTo-Hashtable
+        $db.config[$r.key] = $val
+        $Script:LastSavedJson.config[$r.key] = Get-ObjectJson $val
     }
 
     return $db
@@ -335,13 +393,96 @@ function Load-DatabaseToMemory {
 function Save-MemoryToDatabase($db) {
     try {
         Invoke-SqlQuery "BEGIN TRANSACTION;"
-        if ($db.users) { foreach ($u in $db.users.Values) { Save-User $u } }
-        if ($db.sessions) { foreach ($s in $db.sessions.Keys) { Save-Session @{token=$s; email=$db.sessions[$s]; createdAt=0} } }
-        if ($db.stats) { Save-Stats $db.stats }
-        if ($db.threads) { foreach ($t in $db.threads.Values) { Save-Thread $t } }
-        if ($db.publicChat) { foreach ($m in $db.publicChat) { Save-RoomMessage $m } }
-        if ($db.feedback) { foreach ($f in $db.feedback) { Save-Feedback $f } }
-        if ($db.config) { Save-Config $db.config }
+        
+        # 1. Sync Users
+        if ($db.users) {
+            foreach ($u in $db.users.Values) {
+                $email = $u.email.ToLowerInvariant()
+                $currentJson = Get-ObjectJson $u
+                $lastJson = $Script:LastSavedJson.users[$email]
+                if ($currentJson -ne $lastJson) {
+                    Save-User $u
+                    $Script:LastSavedJson.users[$email] = $currentJson
+                }
+            }
+        }
+        
+        # 2. Sync Sessions
+        if ($db.sessions) {
+            foreach ($token in @($Script:LastSavedJson.sessions.Keys)) {
+                if (-not $db.sessions.ContainsKey($token)) {
+                    Invoke-SqlQuery "DELETE FROM sessions WHERE token = @token" -parameters @{"@token" = $token}
+                    $Script:LastSavedJson.sessions.Remove($token) | Out-Null
+                }
+            }
+            foreach ($token in $db.sessions.Keys) {
+                $email = $db.sessions[$token]
+                if ($Script:LastSavedJson.sessions[$token] -ne $email) {
+                    Save-Session @{token=$token; email=$email; createdAt=0}
+                    $Script:LastSavedJson.sessions[$token] = $email
+                }
+            }
+        }
+        
+        # 3. Sync Stats
+        if ($db.stats) {
+            $currentJson = Get-ObjectJson $db.stats
+            if ($currentJson -ne $Script:LastSavedJson.stats) {
+                Save-Stats $db.stats
+                $Script:LastSavedJson.stats = $currentJson
+            }
+        }
+        
+        # 4. Sync Threads
+        if ($db.threads) {
+            foreach ($key in $db.threads.Keys) {
+                $t = $db.threads[$key]
+                $currentJson = Get-ObjectJson $t
+                $lastJson = $Script:LastSavedJson.threads[$key]
+                if ($currentJson -ne $lastJson) {
+                    Save-Thread $t
+                    $Script:LastSavedJson.threads[$key] = $currentJson
+                }
+            }
+        }
+        
+        # 5. Sync Public Chat
+        if ($db.publicChat) {
+            foreach ($m in $db.publicChat) {
+                $currentJson = Get-ObjectJson $m
+                $lastJson = $Script:LastSavedJson.publicChat[$m.id]
+                if ($currentJson -ne $lastJson) {
+                    Save-RoomMessage $m
+                    $Script:LastSavedJson.publicChat[$m.id] = $currentJson
+                }
+            }
+        }
+        
+        # 6. Sync Feedback
+        if ($db.feedback) {
+            foreach ($f in $db.feedback) {
+                $currentJson = Get-ObjectJson $f
+                $lastJson = $Script:LastSavedJson.feedback[$f.id]
+                if ($currentJson -ne $lastJson) {
+                    Save-Feedback $f
+                    $Script:LastSavedJson.feedback[$f.id] = $currentJson
+                }
+            }
+        }
+        
+        # 7. Sync Config
+        if ($db.config) {
+            foreach ($key in $db.config.Keys) {
+                $val = $db.config[$key]
+                $currentJson = Get-ObjectJson $val
+                $lastJson = $Script:LastSavedJson.config[$key]
+                if ($currentJson -ne $lastJson) {
+                    Save-Config @{$key=$val}
+                    $Script:LastSavedJson.config[$key] = $currentJson
+                }
+            }
+        }
+        
         Invoke-SqlQuery "COMMIT;"
     } catch {
         try { Invoke-SqlQuery "ROLLBACK;" } catch {}

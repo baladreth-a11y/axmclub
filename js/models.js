@@ -12,11 +12,18 @@ const GENDER_LABELS = {
   transsexual:  'Transsexual'
 };
 
-function genderBadge(gender) {
-  if (!gender) return '';
-  const safe = String(gender).toLowerCase();
-  if (!GENDER_LABELS[safe]) return '';
-  return `<span class="badge badge-${safe}">${GENDER_LABELS[safe]}</span>`;
+function genderBadge(gender, accountType) {
+  let badges = '';
+  if (accountType === 'ai') {
+    badges += `<span class="badge badge-ai" style="background: linear-gradient(135deg, #00f2fe, #4facfe); color: #fff; border: none; font-weight: bold; box-shadow: 0 0 10px rgba(0, 242, 254, 0.4); margin-right: var(--space-1);">AI Companion</span> `;
+  }
+  if (gender) {
+    const safe = String(gender).toLowerCase();
+    if (GENDER_LABELS[safe]) {
+      badges += `<span class="badge badge-${safe}">${GENDER_LABELS[safe]}</span>`;
+    }
+  }
+  return badges;
 }
 
 function brandStyle(color) {
@@ -46,14 +53,17 @@ function modelCard(m) {
   const bio   = m.bio
     ? `<p class="muted model-bio">${escapeHtml(m.bio)}</p>`
     : '';
+  
+  const cardClass = m.accountType === 'ai' ? 'model-card model-card--ai' : 'model-card';
+
   return `
-    <article class="model-card" ${brandStyle(m.brandColor)}>
+    <article class="${cardClass}" ${brandStyle(m.brandColor)}>
       <a class="model-card-link" href="${href}" aria-label="View ${escapeHtml(m.name)}">
         ${photo}
         <span class="model-brand-strip" aria-hidden="true"></span>
         <header class="model-head">
           <h3>${escapeHtml(m.name)}</h3>
-          ${genderBadge(m.gender)}
+          ${genderBadge(m.gender, m.accountType)}
         </header>
         ${bio}
       </a>

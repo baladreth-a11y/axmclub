@@ -94,7 +94,98 @@ async function onProfileSubmit(e) {
   }
 }
 
+// ---- AI Autoreply Clone Config --------------------------------------
+function fillAiConfigForm(aiConfig) {
+  const f = $('#aiConfigForm');
+  if (!f) return;
+  f.elements['ai_enabled'].checked = !!(aiConfig && aiConfig.enabled);
+  f.elements['ai_alwaysOn'].checked = !!(aiConfig && aiConfig.alwaysOn);
+  f.elements['ai_cloneName'].value = (aiConfig && aiConfig.cloneName) || '';
+  f.elements['ai_personality'].value = (aiConfig && aiConfig.personality) || '';
+}
+
+async function onAiConfigSubmit(e) {
+  e.preventDefault();
+  const f = e.target;
+  const body = {
+    enabled: f.elements['ai_enabled'].checked,
+    alwaysOn: f.elements['ai_alwaysOn'].checked,
+    cloneName: f.elements['ai_cloneName'].value.trim(),
+    personality: f.elements['ai_personality'].value.trim()
+  };
+  try {
+    const res = await api.modelUpdateAiConfig(body);
+    if (res.ok) {
+      if (currentUser) {
+        currentUser.aiConfig = res.aiConfig;
+        store.set(s => ({ ...s, user: currentUser }));
+      }
+      fillAiConfigForm(res.aiConfig);
+      toast('AI Autoreply Companion Clone settings saved successfully! 🤖', 'success');
+    }
+  } catch (err) {
+    reportError(err);
+  }
+}
+
 // ---- Photos: main upload + gallery add/remove ---------------------
+let nsfwModel = null;
+async function checkNsfwImage(file) {
+  if (typeof nsfwjs === 'undefined') {
+    console.log('NSFW-JS library is not available, skipping pre-flight check.');
+    return true;
+  }
+  toast('Pre-flight scan: checking safety...', 'info');
+  try {
+    if (!nsfwModel) {
+      nsfwModel = await nsfwjs.load();
+    }
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = async () => {
+        try {
+          const predictions = await nsfwModel.classify(img);
+          console.log('[NSFW Pre-flight]', predictions);
+          let pornProb = 0;
+          let hentaiProb = 0;
+          let sexyProb = 0;
+          for (const p of predictions) {
+            if (p.className === 'Porn') pornProb = p.probability;
+            if (p.className === 'Hentai') hentaiProb = p.probability;
+            if (p.className === 'Sexy') sexyProb = p.probability;
+          }
+          const isAdult = (pornProb + hentaiProb > 0.6) || (pornProb + hentaiProb + sexyProb > 0.8);
+          if (isAdult) {
+            const accept = confirm(
+              `⚠️ Explicit Content Warning\n\n` +
+              `Our pre-flight scanner detected that this image may contain explicit or suggestive content:\n` +
+              `· Nudity/Porn: ${(pornProb * 100).toFixed(1)}%\n` +
+              `· Suggestive/Sexy: ${(sexyProb * 100).toFixed(1)}%\n\n` +
+              `Public profiles are visible to all visitors. We strongly recommend using non-explicit images for your main card.\n\n` +
+              `Do you still wish to proceed with uploading this photo?`
+            );
+            resolve(accept);
+          } else {
+            resolve(true);
+          }
+        } catch (err) {
+          console.error('NSFW classification error:', err);
+          resolve(true);
+        } finally {
+          URL.revokeObjectURL(img.src);
+        }
+      };
+      img.onerror = () => {
+        resolve(true);
+      };
+      img.src = URL.createObjectURL(file);
+    });
+  } catch (err) {
+    console.error('Failed to run NSFW check:', err);
+    return true;
+  }
+}
+
 function renderGallery() {
   const grid = $('#galleryGrid');
   if (!grid) return;
@@ -118,6 +209,9 @@ async function onMainPhotoSubmit(e) {
     toast('Pick an image first.', 'error');
     return;
   }
+  const isSafeOrConfirmed = await checkNsfwImage(file);
+  if (!isSafeOrConfirmed) return;
+
   try {
     const res = await api.uploadModelPhoto(file);
     if (res.user) {
@@ -144,6 +238,9 @@ async function onGalleryAddSubmit(e) {
     toast('Pick an image first.', 'error');
     return;
   }
+  const isSafeOrConfirmed = await checkNsfwImage(file);
+  if (!isSafeOrConfirmed) return;
+
   try {
     const res = await api.galleryAdd(file);
     if (res.user) {
@@ -321,6 +418,7 @@ export async function initModelDashboard(user) {
   // we were given, then refresh the cards in parallel.
   store.set({ user });
   fillProfileForm(user);
+  fillAiConfigForm(user.aiConfig);
   // Hydrate the gallery from the user payload (Public-User exposes
   // galleryCount but not the URLs; we fetch the detail via slug).
   if (user.slug) {
@@ -338,6 +436,7 @@ export async function initModelDashboard(user) {
   }
 
   $('#profileForm')?.addEventListener('submit', onProfileSubmit);
+  $('#aiConfigForm')?.addEventListener('submit', onAiConfigSubmit);
 
   // Live preview the brand color while the user types/picks.
   $('#profileForm')?.addEventListener('input', e => {
@@ -366,6 +465,22 @@ export async function initModelDashboard(user) {
     const decline = e.target.closest('.offer-decline');
     if (decline && !decline.disabled) {
       respondToOffer(decline.dataset.from, decline.dataset.id, 'declined');
+    }
+  });
+
+  // Wire up OBS Stream Overlay Card
+  const obsInput = $('#obsUrlInput');
+  if (obsInput) {
+    obsInput.value = `${window.location.origin}/overlay.html`;
+  }
+  $('#btnCopyObsUrl')?.addEventListener('click', () => {
+    if (obsInput) {
+      obsInput.select();
+      navigator.clipboard.writeText(obsInput.value).then(() => {
+        toast('OBS Overlay URL copied to clipboard! 📋', 'success');
+      }).catch(() => {
+        toast('Failed to copy URL.', 'error');
+      });
     }
   });
 

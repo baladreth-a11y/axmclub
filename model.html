@@ -9,6 +9,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
+  <!-- TensorFlow.js and NSFW-JS for client-side pre-flight photo moderation -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/nsfwjs@3.0.1/dist/nsfwjs.min.js"></script>
 </head>
 <body>
   <header id="navHost"></header>
@@ -63,6 +66,31 @@
           </form>
         </section>
 
+        <!-- AI Companion Autoreply Clone Settings -->
+        <section class="dash-card dash-card-wide" id="aiConfigCard">
+          <h2>AI Autoreply Companion Clone</h2>
+          <p class="muted">Toggle and train your personalized AI clone chatbot to chat suggestively and playfully with supporters when you are busy or offline.</p>
+          <form id="aiConfigForm" class="form dash-form">
+            <div style="display: flex; flex-wrap: wrap; gap: var(--space-4); align-items: center; margin-bottom: var(--space-4);">
+              <label style="display: flex; align-items: center; gap: var(--space-2); cursor: pointer; font-weight: 500; font-size: 0.95rem;">
+                <input name="ai_enabled" type="checkbox" style="width: auto; margin: 0; cursor: pointer;" />
+                Enable AI Autoreply Clone
+              </label>
+              <label style="display: flex; align-items: center; gap: var(--space-2); cursor: pointer; font-weight: 500; font-size: 0.95rem;">
+                <input name="ai_alwaysOn" type="checkbox" style="width: auto; margin: 0; cursor: pointer;" />
+                Always-On Autoreply <small class="muted">(AI chats even when online)</small>
+              </label>
+            </div>
+            <label>AI Clone Name <small class="muted">(Leave blank to use your name)</small>
+              <input name="ai_cloneName" type="text" maxlength="60" placeholder="e.g. Cyber Nova" />
+            </label>
+            <label>Personality / System Instructions <small class="muted">(max 280 chars)</small>
+              <textarea name="ai_personality" rows="3" maxlength="280" placeholder="e.g. Playful, suggestively teasing, a gamer girl who loves blockchain and Solana. Use lots of emojis!"></textarea>
+            </label>
+            <button class="btn btn-primary" type="submit">Save AI Settings</button>
+          </form>
+        </section>
+
         <!-- Photo + gallery -->
         <section class="dash-card dash-card-wide" id="photoCard">
           <h2>Photos</h2>
@@ -101,6 +129,22 @@
             <div><dt>Open offers</dt><dd id="statOffersOpen">—</dd></div>
             <div><dt>Accepted</dt><dd id="statOffersWon">—</dd></div>
           </dl>
+        </section>
+
+        <!-- OBS Stream Overlay widget -->
+        <section class="dash-card" style="grid-column: span 8;" id="obsOverlayCard">
+          <h2>OBS stream overlay</h2>
+          <p class="muted" style="margin-bottom: var(--space-4);">
+            Enhance your live stream! Add this transparent overlay to OBS Studio or Streamlabs as a <strong>Browser Source</strong> to get stunning real-time animated alerts and sound effects for tipping and game wins!
+          </p>
+          <div class="obs-copy-row" style="display: flex; gap: var(--space-3); align-items: center; background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: var(--space-2) var(--space-3); margin-bottom: var(--space-3);">
+            <span style="color: var(--muted); font-size: 13px; font-family: monospace; user-select: none;">URL:</span>
+            <input type="text" id="obsUrlInput" readonly value="" style="flex: 1; background: transparent; border: none; color: var(--gold); font-family: monospace; font-size: 13px; outline: none; text-overflow: ellipsis;" />
+            <button class="btn btn-secondary btn-sm" id="btnCopyObsUrl" style="padding: 6px 12px; font-size: 12px; height: auto;">Copy</button>
+          </div>
+          <div class="obs-tips muted">
+            <small>💡 Recommended dimensions: <strong>1920x1080</strong>. Enable "Control audio via OBS" in Browser Source properties to route chimes directly into your audio mixer!</small>
+          </div>
         </section>
 
         <!-- Passwords -->

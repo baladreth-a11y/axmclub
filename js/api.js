@@ -74,6 +74,7 @@ export const api = {
   claimTask:         taskId => request('/api/tasks/claim', { method: 'POST', body: { taskId } }),
 
   buyTokens:         amount => request('/api/tokens/buy', { method: 'POST', body: { amount } }),
+  verifyPayment:     body   => request('/api/payments/verify', { method: 'POST', body }),
   makeOffer:         body   => request('/api/offer',      { method: 'POST', body }),
   // Public model gallery (no auth) + per-slug detail (verified-only).
   models:       () => request('/api/models'),
@@ -92,6 +93,7 @@ export const api = {
   modelOffers:         () => request('/api/model/offers'),
   modelRespondOffer:   body => request('/api/model/offers/respond', { method: 'POST', body }),
   modelStats:          () => request('/api/model/stats'),
+  modelUpdateAiConfig: body => request('/api/model/ai-config', { method: 'POST', body }),
 
   // Photo + gallery uploads (multipart). Files arrive under field 'photo'.
   uploadModelPhoto: file => uploadFile('/api/model/photo', file),

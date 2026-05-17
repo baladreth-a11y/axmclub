@@ -26,6 +26,9 @@ let onlineTimer   = null;
 let peerCam2cam   = false;
 let myCam2cam     = false;
 
+let sseSource     = null;
+let sseActive     = false;
+
 const FAB_HTML = `
   <button id="commFab" class="comm-fab" type="button" aria-haspopup="dialog" aria-controls="commPanel" title="Open chat">
     <span class="comm-fab-icon" aria-hidden="true">\u{1F4AC}</span>
@@ -77,6 +80,9 @@ const FAB_HTML = `
         <button type="button" class="btn btn-outline comm-cam2cam hidden" id="commCam2cam" title="Send cam2cam request">
           \u{1F3A5} Cam2cam
         </button>
+        <button type="button" class="btn btn-outline comm-tip-btn hidden" id="commTipBtn" title="Send a tip via Solana Pay">
+          💸 Tip
+        </button>
       </div>
       <div id="commMessages" class="comm-messages"></div>
       <form id="commComposeForm" class="comm-compose">
@@ -84,6 +90,34 @@ const FAB_HTML = `
         <button type="submit" class="btn btn-primary comm-send">Send</button>
       </form>
     </div>
+    
+    <div id="commTipModal" class="comm-tip-modal hidden">
+      <div class="comm-tip-content">
+        <header class="comm-tip-header">
+          <h4>Tip via Solana Pay</h4>
+          <button type="button" id="commTipClose" class="comm-tip-close">&times;</button>
+        </header>
+        <div class="comm-tip-body">
+          <p>Tip peer in Solana (SOL). Select amount:</p>
+          <div class="comm-tip-presets">
+            <button type="button" class="btn btn-outline comm-preset-btn" data-sol="0.01">0.01 SOL (20 Pts)</button>
+            <button type="button" class="btn btn-outline comm-preset-btn is-active" data-sol="0.05">0.05 SOL (100 Pts)</button>
+            <button type="button" class="btn btn-outline comm-preset-btn" data-sol="0.1">0.10 SOL (200 Pts)</button>
+            <button type="button" class="btn btn-outline comm-preset-btn" data-sol="0.25">0.25 SOL (500 Pts)</button>
+          </div>
+          <div class="comm-qr-area">
+            <div id="commQrContainer" class="comm-qr-container">
+              <div class="comm-qr-spinner">Generating Solana Pay Link...</div>
+            </div>
+            <a id="commSolPayLink" href="#" class="btn btn-primary comm-pay-deeplink" target="_blank">Open in Solana Wallet</a>
+          </div>
+          <div id="commVerifyState" class="comm-verify-state">
+            <span class="pulse-indicator"></span> Waiting for Solana transaction...
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div id="commSignedOut" class="comm-empty hidden">
       Sign in to chat with members.
     </div>
@@ -142,17 +176,21 @@ function renderThreads(list) {
     ul.innerHTML = '<li class="comm-empty">No conversations yet. Start one from the Online tab.</li>';
     return;
   }
-  ul.innerHTML = list.map(t => `
-    <li class="comm-item${t.unread ? ' has-unread' : ''}" data-peer="${escapeHtml(t.peerEmail)}">
-      <span class="online-dot" data-online="${t.peerOnline ? 'true' : 'false'}"></span>
-      <div class="comm-item-main">
-        <strong>${escapeHtml(t.peerName || t.peerEmail)}</strong>
-        <small class="muted comm-last">${escapeHtml(t.lastMessage || 'No messages yet.')}</small>
-      </div>
-      <span class="comm-item-meta">
-        ${t.unread ? `<span class="comm-tab-badge">${t.unread > 99 ? '99+' : t.unread}</span>` : ''}
-      </span>
-    </li>`).join('');
+  ul.innerHTML = list.map(t => {
+    const glowClass = t.peerNameGlow ? 'name-glow' : '';
+    const badgeHtml = t.peerBadge ? `<span class="badge-supporter ${t.peerBadge}">${escapeHtml(t.peerBadge)}</span>` : '';
+    return `
+      <li class="comm-item${t.unread ? ' has-unread' : ''}" data-peer="${escapeHtml(t.peerEmail)}">
+        <span class="online-dot" data-online="${t.peerOnline ? 'true' : 'false'}"></span>
+        <div class="comm-item-main">
+          <strong class="${glowClass}">${escapeHtml(t.peerName || t.peerEmail)}</strong>${badgeHtml}
+          <small class="muted comm-last">${escapeHtml(t.lastMessage || 'No messages yet.')}</small>
+        </div>
+        <span class="comm-item-meta">
+          ${t.unread ? `<span class="comm-tab-badge">${t.unread > 99 ? '99+' : t.unread}</span>` : ''}
+        </span>
+      </li>`;
+  }).join('');
 }
 
 function renderMessages() {
@@ -184,18 +222,32 @@ function renderRoomMessages() {
   }
   wrap.innerHTML = roomMessagesCache.map(m => {
     const mine = (m.from || '').toLowerCase() === ((store.get().user || {}).email || '').toLowerCase();
+    const glowClass = m.nameGlow ? 'name-glow' : '';
+    const badgeHtml = m.badge ? `<span class="badge-supporter ${m.badge}">${escapeHtml(m.badge)}</span>` : '';
     return `
       <div class="comm-msg ${mine ? 'is-mine' : 'is-peer'}">
-        <div class="comm-msg-bubble"><strong>${escapeHtml(m.name)}:</strong> ${escapeHtml(m.text)}</div>
+        <div class="comm-msg-bubble"><strong class="${glowClass}">${escapeHtml(m.name)}</strong>${badgeHtml}: ${escapeHtml(m.text)}</div>
         <div class="comm-msg-time muted">${escapeHtml(formatTime(m.at))}</div>
       </div>`;
   }).join('');
   wrap.scrollTop = wrap.scrollHeight;
 }
 
-function renderPeerHeader(name, online, peerCam) {
+function renderPeerHeader(name, online, peerCam, badge, nameGlow) {
   const nameEl = $('#commPeerName');
-  if (nameEl) nameEl.textContent = name || '\u2014';
+  if (nameEl) {
+    nameEl.innerHTML = '';
+    const span = document.createElement('span');
+    span.textContent = name || '\u2014';
+    if (nameGlow) span.className = 'name-glow';
+    nameEl.appendChild(span);
+    if (badge) {
+      const bSpan = document.createElement('span');
+      bSpan.className = `badge-supporter ${badge}`;
+      bSpan.textContent = badge;
+      nameEl.appendChild(bSpan);
+    }
+  }
   const dot = document.querySelector('#commPeerStatus .online-dot');
   if (dot) dot.dataset.online = online ? 'true' : 'false';
   const lbl = $('#commPeerStatusLabel');
@@ -215,8 +267,16 @@ function showChatView(peerEmail, peerName) {
   $('#commChatView').classList.remove('hidden');
   // Only disable other tabs if we're signed in and switching to a thread.
   document.querySelectorAll('.comm-tab').forEach(t => t.classList.add('is-disabled'));
-  renderPeerHeader(peerName || peerEmail, false, false);
+  renderPeerHeader(peerName || peerEmail, false, false, '', false);
   $('#commMessages').innerHTML = '<div class="comm-empty">Loading\u2026</div>';
+  
+  const user = store.get().user;
+  if (user) {
+    $('#commTipBtn').classList.remove('hidden');
+  } else {
+    $('#commTipBtn').classList.add('hidden');
+  }
+  
   store.set(s => ({ ...s, chat: { ...s.chat, openWith: peerEmail, messages: [] } }));
   fetchMessages(true);
   startMessagesTimer();
@@ -225,6 +285,9 @@ function showChatView(peerEmail, peerName) {
 function backToList() {
   openWith = '';
   $('#commChatView').classList.add('hidden');
+  $('#commTipBtn').classList.add('hidden');
+  $('#commTipModal').classList.add('hidden');
+  stopPaymentVerification();
   document.querySelectorAll('.comm-tab').forEach(t => t.classList.remove('is-disabled'));
   $('#commOnlineList').classList.add('hidden');
   $('#commThreadList').classList.add('hidden');
@@ -294,7 +357,7 @@ async function fetchMessages(initial) {
   if (!openWith) return;
   try {
     const res = await api.chatMessages(openWith, lastSince || 0);
-    if (res.peerName) renderPeerHeader(res.peerName, !!res.peerOnline, !!res.peerCam2cam);
+    if (res.peerName) renderPeerHeader(res.peerName, !!res.peerOnline, !!res.peerCam2cam, res.peerBadge, !!res.peerNameGlow);
     peerCam2cam = !!res.peerCam2cam;
     myCam2cam = !!res.myCam2cam;
     const incoming = res.messages || [];
@@ -377,11 +440,13 @@ function startThreadsTimer() {
 }
 function stopThreadsTimer() { if (threadsTimer) { clearInterval(threadsTimer); threadsTimer = null; } }
 function startMessagesTimer() {
+  if (sseActive) return;
   stopMessagesTimer();
   messagesTimer = setInterval(() => fetchMessages(false), POLL_MESSAGES_MS);
 }
 function stopMessagesTimer() { if (messagesTimer) { clearInterval(messagesTimer); messagesTimer = null; } }
 function startRoomTimer() {
+  if (sseActive) return;
   stopRoomTimer();
   roomTimer = setInterval(() => { if (panelOpen && activeTab === 'room' && !openWith) fetchRoomMessages(false); }, POLL_MESSAGES_MS);
 }
@@ -529,6 +594,44 @@ export function initCommunicator() {
     }
   });
 
+  // Solana preset tipping event handlers
+  let selectedSol = '0.05';
+  
+  function updateSolQr() {
+    const peer = openWith || 'axmclub';
+    const recipient = 'H8G8dZt6vE4o4C1fT5s6N4B8g8S8p8T8w8v8y8z8x8z8';
+    const solpayUrl = `solana:${recipient}?amount=${selectedSol}&label=${encodeURIComponent('AxMclub Tip')}&message=${encodeURIComponent('Tip to ' + peer)}&memo=${encodeURIComponent('tip-' + peer)}`;
+    const qrImgUrl = `https://api.qrserver.com/v1/create-qr-code/?size=140x140&color=05070c&data=${encodeURIComponent(solpayUrl)}`;
+    
+    $('#commQrContainer').innerHTML = `<img src="${qrImgUrl}" alt="Solana Pay QR Code" title="Click to instantly mock confirm this payment!" style="cursor: pointer;" />`;
+    $('#commSolPayLink').href = solpayUrl;
+    
+    startPaymentVerification(selectedSol);
+  }
+
+  $('#commTipBtn').addEventListener('click', () => {
+    $('#commTipModal').classList.remove('hidden');
+    document.querySelectorAll('.comm-preset-btn').forEach(b => {
+      b.classList.toggle('is-active', b.dataset.sol === '0.05');
+    });
+    selectedSol = '0.05';
+    updateSolQr();
+  });
+  
+  $('#commTipClose').addEventListener('click', () => {
+    $('#commTipModal').classList.add('hidden');
+    stopPaymentVerification();
+  });
+  
+  document.querySelectorAll('.comm-preset-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.comm-preset-btn').forEach(b => b.classList.remove('is-active'));
+      btn.classList.add('is-active');
+      selectedSol = btn.dataset.sol;
+      updateSolQr();
+    });
+  });
+
   // React to user state changes.
   refreshForUser(store.get().user);
   store.subscribe(state => {
@@ -544,4 +647,112 @@ export function initCommunicator() {
       stopThreadsTimer();
     }
   });
+
+  initSse();
 }
+
+let paymentPollInterval = null;
+
+function startPaymentVerification(solVal) {
+  stopPaymentVerification();
+  
+  const mockSig = `mock-sig-${Math.random().toString(36).substring(7)}-sol-${solVal}`;
+  
+  const qrContainer = $('#commQrContainer');
+  if (qrContainer) {
+    qrContainer.onclick = async () => {
+      toast('Simulating Solana transaction confirmation on-chain...');
+      try {
+        const res = await api.verifyPayment({ signature: mockSig, amountSol: parseFloat(solVal) });
+        if (res && res.ok) {
+          toast(`✨ Successfully confirmed! Added ${res.tokensAwarded} tokens.`, 'success');
+          stopPaymentVerification();
+          $('#commTipModal').classList.add('hidden');
+          store.set(s => ({ ...s, user: res.user }));
+        }
+      } catch (err) {
+        reportError(err, 'Failed to verify transaction.');
+      }
+    };
+  }
+}
+
+function stopPaymentVerification() {
+  if (paymentPollInterval) {
+    clearInterval(paymentPollInterval);
+    paymentPollInterval = null;
+  }
+}
+
+function initSse() {
+  if (sseSource) {
+    sseSource.close();
+    sseSource = null;
+  }
+
+  sseSource = new EventSource('/api/stream');
+  
+  sseSource.onopen = () => {
+    console.log('[SSE] Stream connected successfully. Polling disabled.');
+    sseActive = true;
+    stopMessagesTimer();
+    stopRoomTimer();
+  };
+  
+  sseSource.onmessage = (event) => {
+    try {
+      const payload = JSON.parse(event.data);
+      if (payload.type === 'ping') return;
+      
+      if (payload.type === 'public-chat') {
+        const msg = payload.data;
+        if (!roomMessagesCache.some(m => m.id === msg.id)) {
+          roomMessagesCache.push(msg);
+          if (roomMessagesCache.length > 200) {
+            roomMessagesCache.shift();
+          }
+          roomSince = Math.max(roomSince, msg.at || 0);
+          if (panelOpen && activeTab === 'room' && !openWith) {
+            renderRoomMessages();
+          }
+        }
+      }
+      
+      else if (payload.type === 'private-chat') {
+        const data = payload.data;
+        const msg = data.message;
+        
+        const isCurrentPeer = (openWith && (openWith.toLowerCase() === msg.from.toLowerCase() || openWith.toLowerCase() === data.peerEmail.toLowerCase()));
+        
+        if (isCurrentPeer) {
+          if (!messagesCache.some(m => m.id === msg.id)) {
+            messagesCache.push(msg);
+            lastSince = Math.max(lastSince, msg.at || 0);
+            renderMessages();
+            // Clear unread indicator dynamically
+            api.chatMessages(openWith);
+          }
+        }
+        
+        fetchThreads();
+      }
+      
+      else if (payload.type === 'spin-win') {
+        const data = payload.data;
+        const myName = store.get().user ? store.get().user.name : '';
+        if (data.name !== myName) {
+          toast(`✨ ${data.name} just won ${data.points} pts on the wheel (${data.label})!`);
+        }
+      }
+    } catch (err) {
+      console.error('[SSE] Failed to parse event data:', err);
+    }
+  };
+  
+  sseSource.onerror = () => {
+    console.warn('[SSE] Connection lost. Reconnecting in 5s...');
+    sseActive = false;
+    sseSource.close();
+    sseSource = null;
+    setTimeout(initSse, 5000);
+  };

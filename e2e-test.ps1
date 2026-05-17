@@ -343,7 +343,7 @@ try {
 
     Section '11. Rewards catalog'
     $catAnon = Invoke-RestMethod -Uri ($Base + '/api/rewards')
-    Check 'Catalog has 5 rewards' (@($catAnon.rewards).Count -eq 5) ('got ' + @($catAnon.rewards).Count)
+    Check 'Catalog has 6 rewards' (@($catAnon.rewards).Count -eq 6) ('got ' + @($catAnon.rewards).Count)
     $catIds = ''
     foreach ($r in @($catAnon.rewards)) { $catIds = $catIds + ',' + $r.id }
     Check 'Catalog contains cam-pass' ($catIds -match 'cam-pass')
@@ -1222,6 +1222,115 @@ try {
     Check 'cam.html exposes call controls'            ((Invoke-WebRequest -Uri ($Base + '/cam.html') -UseBasicParsing).Content -match 'id="camEndCall"')
     Check 'styles.css ships .cam-room-grid'           ($cssSrc -match '\.cam-room-grid')
     Check 'styles.css ships .cam-pip'                 ($cssSrc -match '\.cam-pip')
+
+    Section '25. Solana Pay Verification'
+    $anonVerifyCode = 0
+    try {
+        $null = Invoke-RestMethod -Uri ($Base + '/api/payments/verify') -Method Post -ContentType 'application/json' -Body (JsonBody @{ signature='mock-sig-xyz' })
+    } catch { $anonVerifyCode = StatusCodeOf $_ }
+    Check 'Anonymous payment verify returns 401' ($anonVerifyCode -eq 401) ('got ' + $anonVerifyCode)
+
+    $emptySigCode = 0
+    try {
+        $null = Invoke-RestMethod -Uri ($Base + '/api/payments/verify') -Method Post -ContentType 'application/json' -WebSession $aliceSession -Body (JsonBody @{ signature='' })
+    } catch { $emptySigCode = StatusCodeOf $_ }
+    Check 'Empty signature returns 400' ($emptySigCode -eq 400) ('got ' + $emptySigCode)
+
+    $verifyRes = Invoke-RestMethod -Uri ($Base + '/api/payments/verify') -Method Post -ContentType 'application/json' -WebSession $aliceSession -Body (JsonBody @{ signature='mock-sig-abc-sol-0.25'; amountSol=0.25 })
+    Check 'Mock Solana verify endpoint returns ok' ($verifyRes.ok -eq $true)
+    Check 'Mock Solana verify awards expected tokens (2000 per SOL)' ($verifyRes.tokensAwarded -eq 500) ('got ' + $verifyRes.tokensAwarded)
+    Check 'Alice tokens updated' ($verifyRes.user.tokens -eq 1000) ('got ' + $verifyRes.user.tokens)
+
+    $doubleSpendCode = 0
+    try {
+        $null = Invoke-RestMethod -Uri ($Base + '/api/payments/verify') -Method Post -ContentType 'application/json' -WebSession $aliceSession -Body (JsonBody @{ signature='mock-sig-abc-sol-0.25'; amountSol=0.25 })
+    } catch { $doubleSpendCode = StatusCodeOf $_ }
+    Check 'Double spending signature returns 409 Conflict' ($doubleSpendCode -eq 409) ('got ' + $doubleSpendCode)
+
+    Section '26. Gemini AI Companion Bots'
+    $modelsRes = Invoke-RestMethod -Uri ($Base + '/api/models')
+    $lunaModel = @($modelsRes.models) | Where-Object { $_.slug -eq 'luna' }
+    Check 'Luna AI Companion exists in roster' ($null -ne $lunaModel)
+    Check 'Luna accountType is ai' ($lunaModel.accountType -eq 'ai') ('got ' + $lunaModel.accountType)
+
+    $lunaDetail = Invoke-RestMethod -Uri ($Base + '/api/models/luna') -WebSession $aliceSession
+    Check 'Luna details load successfully' ($lunaDetail.model.name -eq 'Luna')
+
+    $lunaSend = Invoke-RestMethod -Uri ($Base + '/api/chat/send') -Method Post -ContentType 'application/json' -WebSession $aliceSession `
+        -Body (JsonBody @{ peer='luna@example.com'; text='Hi Luna, tell me about yourself!' })
+    Check 'DM send to Luna returned ok' ($lunaSend.ok -eq $true)
+    Check 'DM send to Luna returned threadId' ([bool]$lunaSend.threadId)
+
+    # Wait for the async simulated background AI responder to type and persist
+    Start-Sleep -Seconds 3
+
+    $lunaMsgs = Invoke-RestMethod -Uri ($Base + '/api/chat/messages?peer=luna@example.com') -WebSession $aliceSession
+    $lunaReply = @($lunaMsgs.messages) | Where-Object { $_.from -eq 'luna@example.com' } | Select-Object -First 1
+    Check 'Luna sent a background reply' ($null -ne $lunaReply)
+    if ($lunaReply) {
+        Check 'Luna reply contains text' ($lunaReply.text.Length -gt 0) ('got ' + $lunaReply.text)
+    }
+
+    Section '27. Model AI Autoreply Settings & Clone Messaging'
+    # Fetch initial config (should be empty or defaults)
+    $initAi = Invoke-RestMethod -Uri ($Base + '/api/model/ai-config') -WebSession $modelSess
+    Check 'Initial model AI config is empty' ($null -eq $initAi.aiConfig.enabled -or $initAi.aiConfig.enabled -eq $false)
+
+    # Save new config settings
+    $saveAi = Invoke-RestMethod -Uri ($Base + '/api/model/ai-config') -Method Post -ContentType 'application/json' -WebSession $modelSess `
+        -Body (JsonBody @{ enabled=$true; alwaysOn=$true; cloneName='Cyber Nova'; personality='retro gamer clone' })
+    Check 'Save AI config returned ok' ($saveAi.ok -eq $true)
+    Check 'AI config enabled is saved' ($saveAi.aiConfig.enabled -eq $true)
+    Check 'AI config cloneName is saved' ($saveAi.aiConfig.cloneName -eq 'Cyber Nova')
+    Check 'AI config personality is saved' ($saveAi.aiConfig.personality -eq 'retro gamer clone')
+
+    # Send a message to model to trigger the custom-prompted Gemini clone responder
+    $novaSend = Invoke-RestMethod -Uri ($Base + '/api/chat/send') -Method Post -ContentType 'application/json' -WebSession $aliceSession `
+        -Body (JsonBody @{ peer='nova@example.com'; text='Hi Nova, are you there?' })
+    Check 'DM send to model Nova returned ok' ($novaSend.ok -eq $true)
+
+    # Wait for the async simulated background AI responder to respond
+    Start-Sleep -Seconds 3
+
+    # Fetch messages and verify the clone replied dynamically
+    $novaMsgs = Invoke-RestMethod -Uri ($Base + '/api/chat/messages?peer=nova@example.com') -WebSession $aliceSession
+    $novaReply = @($novaMsgs.messages) | Where-Object { $_.from -eq 'nova@example.com' } | Select-Object -First 1
+    Check 'Nova AI clone sent a reply' ($null -ne $novaReply)
+    if ($novaReply) {
+        Check 'Nova reply contains custom cloneName' ($novaReply.text -match 'Cyber Nova') ('got ' + $novaReply.text)
+    }
+
+    Section '28. Web3 Supporter Tiers, Glowing Badges, & Redeemable Name Glow'
+    # Retrieve Alice's initial tier based on 1000 tokens
+    $aliceGold = Invoke-RestMethod -Uri ($Base + '/api/me') -WebSession $aliceSession
+    Check 'Alice computed tier badge is Gold' ($aliceGold.user.badge -eq 'gold') ('got ' + $aliceGold.user.badge)
+
+    # Award Alice another 1000 tokens to cross the 2000 mark (Platinum)
+    $platVerify = Invoke-RestMethod -Uri ($Base + '/api/payments/verify') -Method Post -ContentType 'application/json' `
+        -WebSession $aliceSession -Body (JsonBody @{ signature='mock-sig-plat-sol-0.5'; amountSol=0.5 })
+    Check 'Awarding 1000 tokens succeeds' ($platVerify.tokensAwarded -eq 1000) ('got ' + $platVerify.tokensAwarded)
+    Check 'Alice tokens updated to 2000' ($platVerify.user.tokens -eq 2000) ('got ' + $platVerify.user.tokens)
+    Check 'Alice computed tier badge updated to Platinum' ($platVerify.user.badge -eq 'platinum') ('got ' + $platVerify.user.badge)
+
+    # Redeem "Premium name glow" (costs 1000 points, Gold tier min)
+    # First, make sure Alice has at least 1000 points. Let's adjust her points via the admin endpoint.
+    $adjustPoints = Invoke-RestMethod -Uri ($Base + '/api/admin/users/adjust') -Method Post -ContentType 'application/json' `
+        -Headers $adminHead -Body (JsonBody @{ email='alice@example.com'; points=1500 })
+    Check 'Points adjusted for Alice' ($adjustPoints.user.points -eq 1500) ('got ' + $adjustPoints.user.points)
+
+    $redeemGlow = Invoke-RestMethod -Uri ($Base + '/api/redeem') -Method Post -ContentType 'application/json' `
+        -WebSession $aliceSession -Body (JsonBody @{ rewardId='name-glow' })
+    Check 'Name glow redemption succeeds' ($null -ne $redeemGlow.redemption)
+
+    # Fetch Alice's details and assert nameGlow is true
+    $aliceGlow = Invoke-RestMethod -Uri ($Base + '/api/me') -WebSession $aliceSession
+    Check 'Alice nameGlow is now active' ($aliceGlow.user.nameGlow -eq $true)
+
+    Section '29. OBS Stream Overlay HUD Layout Probe'
+    # Probe overlay.html with HUD layout
+    $hudProbe = Invoke-WebRequest -Uri ($Base + '/overlay.html?layout=hud') -UseBasicParsing
+    Check 'overlay.html?layout=hud returns 200' ($hudProbe.StatusCode -eq 200)
+    Check 'overlay.html contains goal progress thermometer' ($hudProbe.Content -match 'id="goal-container"')
 
     Section 'Summary'
     Log ('  Passed: ' + $script:pass) 'Green'
