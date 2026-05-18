@@ -49,7 +49,13 @@ CREATE TABLE users (
     gallery TEXT,
     tasks TEXT,
     redemptions TEXT,
-    socials TEXT
+    socials TEXT,
+    aiConfig TEXT,
+    slug TEXT,
+    photoUrl TEXT,
+    lastSeenMs INTEGER,
+    cam2cam INTEGER,
+    dmPolicy TEXT
 );
 CREATE TABLE sessions (
     token TEXT PRIMARY KEY,
@@ -97,9 +103,9 @@ Invoke-SqlQuery -query "INSERT INTO stats (id, members, spins, offersPending, of
 
 # 3. Add 3 Models
 $models = @(
-    @{ email='model1@axmclub.com'; name='Model One'; bio='The first of our exclusive models.' }
-    @{ email='model2@axmclub.com'; name='Model Two'; bio='Style and grace in every show.' }
-    @{ email='model3@axmclub.com'; name='Model Three'; bio='Your new favorite entertainer.' }
+    @{ email='luna@example.com'; name='Luna'; slug='luna'; bio='Your sweet and helpful AI companion. I am always online and ready to chat. Let''s get to know each other!'; brandColor='#00f2fe'; photoUrl='/uploads/models/luna/profile.png'; aiConfig='{"enabled":true,"alwaysOn":true,"cloneName":"Luna","personality":"friendly, welcoming, and suggestively playful"}'; rank='Platinum' }
+    @{ email='chloe@axmclub.com'; name='Chloe'; slug='chloe'; bio='Sassy, energetic blonde beauty with a big attitude. I love teasing, gold jewelry, and late night club vibes!'; brandColor='#ff758c'; photoUrl='/uploads/models/chloe/profile.png'; aiConfig='{"enabled":true,"alwaysOn":true,"cloneName":"Chloe","personality":"sassy, confident, energetic, and playful"}'; rank='Gold' }
+    @{ email='nova@axmclub.com'; name='Nova'; slug='nova'; bio='Sophisticated and creative dark-haired model. Hosting the Sunday Brunches and late-night lounge sessions.'; brandColor='#a18cd1'; photoUrl='/uploads/models/nova/profile.png'; aiConfig='{"enabled":true,"alwaysOn":true,"cloneName":"Nova","personality":"sophisticated, creative, seductive, and thoughtful"}'; rank='Diamond' }
 )
 
 # Helper to hash password
@@ -138,13 +144,19 @@ foreach ($m in $models) {
         verifyToken = ''
         verifyTokenExpires = 0
         bio = $m.bio
-        brandColor = '#d4af6a'
+        brandColor = $m.brandColor
         gender = 'female'
-        rank = 'Platinum'
+        rank = $m.rank
         gallery = @()
         tasks = @{}
         redemptions = @()
         socials = @{ telegram=''; snap=''; webcam='' }
+        aiConfig = $m.aiConfig | ConvertFrom-Json
+        slug = $m.slug
+        photoUrl = $m.photoUrl
+        lastSeenMs = 0
+        cam2cam = 1
+        dmPolicy = 'open'
     }
     Save-User $u
     Write-Host "Created Model: $($m.email) (password: axm123)" -ForegroundColor Green

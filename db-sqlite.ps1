@@ -127,13 +127,24 @@ CREATE TABLE IF NOT EXISTS config (
     $seedCmd.CommandText = @"
 INSERT OR IGNORE INTO stats (id, members, spins, offersPending, offersAccepted, visits) VALUES (1, 0, 0, 0, 0, 0);
 INSERT OR IGNORE INTO users (email, name, pwHash, pwSalt, points, tokens, spins, lastSpinMs, accountType, joinedMs, emailVerified, verifyToken, verifyTokenExpires, bio, brandColor, gender, rank, gallery, tasks, redemptions, socials, aiConfig, slug, photoUrl, lastSeenMs, cam2cam, dmPolicy) 
-VALUES ('luna@example.com', 'Luna', '', '', 0, 0, 0, 0, 'model', 1700000000000, 1, '', 0, 'Your sweet and helpful AI companion. I am always online and ready to chat. Let''s get to know each other!', '#00f2fe', 'female', 'Platinum', '[]', '{}', '[]', '{}', '{"enabled":true,"alwaysOn":true,"cloneName":"Luna","personality":"friendly, welcoming, and suggestively playful"}', 'luna', '', 0, 1, 'open');
+VALUES ('luna@example.com', 'Luna', '', '', 0, 0, 0, 0, 'model', 1700000000000, 1, '', 0, 'Your sweet and helpful AI companion. I am always online and ready to chat. Let''s get to know each other!', '#00f2fe', 'female', 'Platinum', '[]', '{}', '[]', '{}', '{"enabled":true,"alwaysOn":true,"cloneName":"Luna","personality":"friendly, welcoming, and suggestively playful"}', 'luna', '/uploads/models/luna/profile.png', 0, 1, 'open');
+INSERT OR IGNORE INTO users (email, name, pwHash, pwSalt, points, tokens, spins, lastSpinMs, accountType, joinedMs, emailVerified, verifyToken, verifyTokenExpires, bio, brandColor, gender, rank, gallery, tasks, redemptions, socials, aiConfig, slug, photoUrl, lastSeenMs, cam2cam, dmPolicy) 
+VALUES ('chloe@axmclub.com', 'Chloe', '', '', 0, 0, 0, 0, 'model', 1700000000000, 1, '', 0, 'Sassy, energetic blonde beauty with a big attitude. I love teasing, gold jewelry, and late night club vibes!', '#ff758c', 'female', 'Gold', '[]', '{}', '[]', '{}', '{"enabled":true,"alwaysOn":true,"cloneName":"Chloe","personality":"sassy, confident, energetic, and playful"}', 'chloe', '/uploads/models/chloe/profile.png', 0, 1, 'open');
+INSERT OR IGNORE INTO users (email, name, pwHash, pwSalt, points, tokens, spins, lastSpinMs, accountType, joinedMs, emailVerified, verifyToken, verifyTokenExpires, bio, brandColor, gender, rank, gallery, tasks, redemptions, socials, aiConfig, slug, photoUrl, lastSeenMs, cam2cam, dmPolicy) 
+VALUES ('nova@axmclub.com', 'Nova', '', '', 0, 0, 0, 0, 'model', 1700000000000, 1, '', 0, 'Sophisticated and creative dark-haired model. Hosting the Sunday Brunches and late-night lounge sessions.', '#a18cd1', 'female', 'Diamond', '[]', '{}', '[]', '{}', '{"enabled":true,"alwaysOn":true,"cloneName":"Nova","personality":"sophisticated, creative, seductive, and thoughtful"}', 'nova', '/uploads/models/nova/profile.png', 0, 1, 'open');
 "@
     $seedCmd.ExecuteNonQuery() | Out-Null
 
-    # Automatically migrate existing Luna to 'model' and enable aiConfig
+    # Force update profile photos & details for existings
     $updCmd = $Script:SqliteConn.CreateCommand()
-    $updCmd.CommandText = 'UPDATE users SET accountType = ''model'', aiConfig = ''{"enabled":true,"alwaysOn":true,"cloneName":"Luna","personality":"friendly, welcoming, and suggestively playful"}'' WHERE email = ''luna@example.com'' AND (accountType = ''ai'' OR aiConfig IS NULL OR aiConfig = ''{}'')'
+    $updCmd.CommandText = @"
+UPDATE users SET photoUrl = '/uploads/models/luna/profile.png', slug = 'luna', brandColor = '#00f2fe' WHERE email = 'luna@example.com' AND (photoUrl IS NULL OR photoUrl = '' OR slug IS NULL OR slug = '');
+UPDATE users SET photoUrl = '/uploads/models/chloe/profile.png', slug = 'chloe', brandColor = '#ff758c' WHERE email = 'chloe@axmclub.com' AND (photoUrl IS NULL OR photoUrl = '' OR slug IS NULL OR slug = '');
+UPDATE users SET photoUrl = '/uploads/models/nova/profile.png', slug = 'nova', brandColor = '#a18cd1' WHERE email = 'nova@axmclub.com' AND (photoUrl IS NULL OR photoUrl = '' OR slug IS NULL OR slug = '');
+UPDATE users SET accountType = 'model', aiConfig = '{"enabled":true,"alwaysOn":true,"cloneName":"Luna","personality":"friendly, welcoming, and suggestively playful"}' WHERE email = 'luna@example.com' AND (accountType = 'ai' OR aiConfig IS NULL OR aiConfig = '{}');
+UPDATE users SET accountType = 'model', aiConfig = '{"enabled":true,"alwaysOn":true,"cloneName":"Chloe","personality":"sassy, confident, energetic, and playful"}' WHERE email = 'chloe@axmclub.com' AND (accountType = 'ai' OR aiConfig IS NULL OR aiConfig = '{}');
+UPDATE users SET accountType = 'model', aiConfig = '{"enabled":true,"alwaysOn":true,"cloneName":"Nova","personality":"sophisticated, creative, seductive, and thoughtful"}' WHERE email = 'nova@axmclub.com' AND (accountType = 'ai' OR aiConfig IS NULL OR aiConfig = '{}');
+"@
     $updCmd.ExecuteNonQuery() | Out-Null
 }
 

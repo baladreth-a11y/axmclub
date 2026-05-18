@@ -853,7 +853,7 @@ try {
     }
     if ($upResult.statusCode -eq 200 -and $upJson) {
         Check 'Main photo upload ok'                 ($upJson.ok -eq $true)
-        Check 'Main photo URL under /uploads/'       ($upJson.photoUrl -match '^/uploads/models/nova/main\.png$') ('got ' + $upJson.photoUrl)
+        Check 'Main photo URL under /uploads/'       ($upJson.photoUrl -match '^/uploads/models/nova(-[0-9]+)?/main\.png$') ('got ' + $upJson.photoUrl)
         Check 'Public-User photoUrl reflects upload' ($upJson.user.photoUrl -eq $upJson.photoUrl)
 
         $servePhoto = Invoke-WebRequest -Uri ($Base + $upJson.photoUrl) -UseBasicParsing

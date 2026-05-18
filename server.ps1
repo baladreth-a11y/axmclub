@@ -223,6 +223,75 @@ public static class AxmSse {
         }
     }
 }
+
+public static class AxmAi {
+    private static string EscapeJson(string text) {
+        if (string.IsNullOrEmpty(text)) return "";
+        return text.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "\\r").Replace("\t", "\\t");
+    }
+
+    private static string ExtractText(string geminiResponse) {
+        try {
+            var match = Regex.Match(geminiResponse, @"""text""\s*:\s*""((?:[^""\\]|\\.)*)""");
+            if (match.Success) {
+                string val = match.Groups[1].Value;
+                return val.Replace("\\n", "\n").Replace("\\\"", "\"").Replace("\\\\", "\\");
+            }
+        } catch {}
+        return "";
+    }
+
+    public static void QueueResponse(string userEmail, string aiEmail, string threadId, string apiKey, string cloneName, string aiBio, string personality, string historyJson, string internalEndpoint) {
+        ThreadPool.QueueUserWorkItem(state => {
+            try {
+                bool isTest = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("AURUM_E2E")) || !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("AURUM_E2E_TEST"));
+                int delay = isTest ? 100 : new Random().Next(1200, 2200);
+                Thread.Sleep(delay);
+
+                string replyText = "";
+                if (string.IsNullOrEmpty(apiKey)) {
+                    string[] fallbacks = new string[] {
+                        "Aww, hey there! I'm " + cloneName + ". I was hoping you'd message me today. What's on your mind? 💕",
+                        "Hi sweetheart! " + cloneName + " here. Tell me, how has your day been going so far? ✨",
+                        "Hey! AxMclub is so much fun, isn't it? " + cloneName + " loves chatting with wonderful people like you. What are you up to?",
+                        "Mmm, " + cloneName + " would love to get to know you better. Tell me your favorite hobbies! 😘"
+                    };
+                    replyText = fallbacks[new Random().Next(fallbacks.Length)];
+                } else {
+                    try {
+                        using (var client = new WebClient()) {
+                            client.Headers[HttpRequestHeader.ContentType] = "application/json";
+                            client.Encoding = Encoding.UTF8;
+                            
+                            string prompt = "You are a friendly, engaging AI companion clone on AxMclub representing model named " + cloneName + ". Model Bio: " + aiBio + ". Personality Instructions: " + personality + ". Talk to the member, make them feel welcome. Chat history:\\n" + EscapeJson(historyJson) + "\\nRespond with one short paragraph max (1-2 sentences), keeping it natural like a text message.";
+                            string body = "{ \"contents\": [ { \"parts\": [ { \"text\": \"" + EscapeJson(prompt) + "\" } ] } ] }";
+                            string url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + apiKey;
+                            
+                            string res = client.UploadString(url, body);
+                            replyText = ExtractText(res);
+                            if (string.IsNullOrEmpty(replyText)) {
+                                replyText = "Tell me more, sweetheart! I'm listening. 💖";
+                            }
+                        }
+                    } catch (Exception) {
+                        replyText = "Mmm, something interrupted my thoughts. What were we saying, handsome? 😘";
+                    }
+                }
+
+                try {
+                    using (var client = new WebClient()) {
+                        client.Headers[HttpRequestHeader.ContentType] = "application/json";
+                        client.Encoding = Encoding.UTF8;
+                        string body = "{ \"userEmail\": \"" + EscapeJson(userEmail) + "\", \"aiEmail\": \"" + EscapeJson(aiEmail) + "\", \"threadId\": \"" + EscapeJson(threadId) + "\", \"text\": \"" + EscapeJson(replyText) + "\" }";
+                        client.UploadString(internalEndpoint, body);
+                    }
+                } catch (Exception) {
+                }
+            } catch (Exception) {
+            }
+        });
+    }
+}
 "@
   Write-Host "[boot] AxmMultipart type loaded" -ForegroundColor DarkGray
 } catch {
@@ -3711,6 +3780,62 @@ function Invoke-ChatHandler($req, $resp, $db, $path, $method) {
       return $true
     }
 
+    'POST /api/internal/ai-reply' {
+      $remoteEp = $req.RemoteEndPoint
+      $remoteIp = $remoteEp.Address.ToString()
+      if ($remoteIp -ne "127.0.0.1" -and $remoteIp -ne "::1" -and $remoteIp -ne "localhost") {
+        Send-Json $resp @{ error = 'Forbidden' } 403
+        return $true
+      }
+      
+      $body = Read-JsonBody $req
+      $userEmail = $body.userEmail
+      $aiEmail = $body.aiEmail
+      $threadId = $body.threadId
+      $replyText = $body.text
+      
+      if (-not $userEmail -or -not $aiEmail -or -not $threadId -or -not $replyText) {
+        Send-Json $resp @{ error = 'Bad Request' } 400
+        return $true
+      }
+      
+      [Threading.Monitor]::Enter($Script:DbLock)
+      try {
+        $db = $Script:Db
+        $thread = $db.threads[$threadId]
+        if ($thread) {
+          $now = NowMs
+          $aiMsg = @{
+            id   = (New-Token)
+            from = [string]$aiEmail
+            text = [string]$replyText
+            at   = $now
+          }
+          if (-not $thread.messages) { $thread.messages = @() }
+          $thread.messages = @($thread.messages) + $aiMsg
+          if ($thread.messages.Count -gt [int]$Script:ChatMessagesPerThread) {
+            $thread.messages = @($thread.messages[($thread.messages.Count - [int]$Script:ChatMessagesPerThread)..($thread.messages.Count - 1)])
+          }
+          $thread.lastMs = $now
+          if (-not $thread.lastRead) { $thread.lastRead = @{} }
+          $thread.lastRead[([string]$aiEmail).ToLowerInvariant()] = $now
+          Save-Db $db
+          
+          Broadcast-SseEvent -type "private-chat" -payload @{
+            threadId    = [string]$thread.id
+            peerEmail   = [string]$userEmail
+            senderEmail = [string]$aiEmail
+            message     = $aiMsg
+          }
+        }
+      } finally {
+        [Threading.Monitor]::Exit($Script:DbLock)
+      }
+      
+      Send-Json $resp @{ ok = $true }
+      return $true
+    }
+
     'POST /api/chat/send' {
       $u = Assert-Auth $req $resp $db
       if (-not $u) { return $true }
@@ -3771,7 +3896,7 @@ function Invoke-ChatHandler($req, $resp, $db, $path, $method) {
         message     = $msg
       }
       if ($peer.accountType -eq 'ai') {
-        Invoke-AiResponse $u.email $peer.email $thread.id
+        Trigger-AsyncAiResponse $u.email $peer.email $thread.id
       } elseif ($peer.accountType -eq 'model') {
         $aiConfig = $peer.aiConfig
         Write-ServerLog "Checking AI Config for $($peer.email): enabled=$($aiConfig.enabled), alwaysOn=$($aiConfig.alwaysOn)"
@@ -3786,7 +3911,7 @@ function Invoke-ChatHandler($req, $resp, $db, $path, $method) {
           }
           if ($alwaysOn -or -not $isOnline) {
             Write-ServerLog "Invoking AI Response for $($peer.email)"
-            Invoke-AiResponse $u.email $peer.email $thread.id
+            Trigger-AsyncAiResponse $u.email $peer.email $thread.id
           }
         }
       }
@@ -3960,6 +4085,68 @@ function Invoke-ApiHandler($req, $resp, $path, $method) {
     Send-Json $resp @{ error = 'Not found.' } 404
 }
 
+# ---- Dynamic XML Sitemap Generator ----
+function Send-Sitemap($resp) {
+    [Threading.Monitor]::Enter($Script:DbLock)
+    try {
+        $models = @()
+        foreach ($email in $Script:Db.users.Keys) {
+            $u = $Script:Db.users[$email]
+            if ($u.accountType -eq 'model' -and $u.slug) {
+                $models += $u.slug
+            }
+        }
+    } finally {
+        [Threading.Monitor]::Exit($Script:DbLock)
+    }
+
+    $xml = "<?xml version=`"1.0`" encoding=`"UTF-8`"?>`n"
+    $xml += "<urlset xmlns=`"http://www.sitemaps.org/schemas/sitemap/0.9`">`n"
+    
+    # Static pages
+    $xml += "  <url>`n    <loc>https://axmclub.com/</loc>`n    <changefreq>daily</changefreq>`n    <priority>1.0</priority>`n  </url>`n"
+    $xml += "  <url>`n    <loc>https://axmclub.com/players.html</loc>`n    <changefreq>weekly</changefreq>`n    <priority>0.8</priority>`n  </url>`n"
+    $xml += "  <url>`n    <loc>https://axmclub.com/supporters.html</loc>`n    <changefreq>weekly</changefreq>`n    <priority>0.8</priority>`n  </url>`n"
+    
+    # Dynamic models pages
+    foreach ($slug in $models) {
+        $xml += "  <url>`n    <loc>https://axmclub.com/m.html?model=$slug</loc>`n    <changefreq>daily</changefreq>`n    <priority>0.9</priority>`n  </url>`n"
+    }
+    
+    $xml += "</urlset>"
+    
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($xml)
+    $resp.ContentType = "application/xml; charset=utf-8"
+    $resp.ContentLength64 = $bytes.Length
+    $resp.OutputStream.Write($bytes, 0, $bytes.Length)
+    $resp.Close()
+}
+
+# ---- Asynchronous Background Worker Trigger ----
+function Trigger-AsyncAiResponse($userEmail, $aiEmail, $threadId) {
+    $db = $Script:Db
+    $peer = $db.users[$aiEmail]
+    $aiConfig = $peer.aiConfig
+    $cloneName = if ($aiConfig -and $aiConfig.cloneName) { $aiConfig.cloneName } else { $peer.name }
+    $aiBio = "$($peer.bio)"
+    $personality = if ($aiConfig -and $aiConfig.personality) { $aiConfig.personality } else { "friendly, welcoming, and suggestively playful" }
+    
+    $thread = $db.threads[$threadId]
+    $history = ""
+    if ($thread -and $thread.messages) {
+        $recent = $thread.messages | Select-Object -Last 10
+        foreach ($m in $recent) {
+            $senderName = if ($m.from -eq $aiEmail) { $cloneName } else { "User" }
+            $history += "$($senderName): $($m.text)`n"
+        }
+    }
+    
+    $apiKey = if ($env:GEMINI_API_KEY) { $env:GEMINI_API_KEY } else { "" }
+    $internalEndpoint = "http://127.0.0.1:$Port/api/internal/ai-reply"
+    
+    [AxmAi]::QueueResponse($userEmail, $aiEmail, $threadId, $apiKey, $cloneName, $aiBio, $personality, $history, $internalEndpoint)
+}
+
 # ---------- Dispatcher ----------
 function Invoke-RequestHandler($ctx) {
     $req  = $ctx.Request
@@ -3980,6 +4167,10 @@ function Invoke-RequestHandler($ctx) {
         if ($path -eq '/api/stream') {
             $callback = [System.Delegate]::CreateDelegate([System.Threading.WaitCallback], [AxmSse].GetMethod("HandleRequest"))
             [System.Threading.ThreadPool]::QueueUserWorkItem($callback, $ctx) | Out-Null
+            return
+        }
+        if ($path -eq '/sitemap.xml') {
+            Send-Sitemap $resp
             return
         }
         if ($path -like '/api/*') {
