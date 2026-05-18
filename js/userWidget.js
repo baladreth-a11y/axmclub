@@ -1,4 +1,4 @@
-import { $, escapeHtml } from './util.js';
+import { $, escapeHtml, nextTierInfo } from './util.js';
 import { api } from './api.js';
 import { store } from './store.js';
 import { toast , reportError} from './ui.js';
@@ -11,14 +11,51 @@ function formatRank(rank) {
 
 function render(state) {
   const u = state.user;
-  $('#widgetRank').textContent     = u ? formatRank(u.rank) : '—';
-  $('#widgetLevel').textContent    = u ? (u.level || 0).toLocaleString() : '—';
-  $('#widgetPoints').textContent   = u ? (u.points || 0).toLocaleString() : '—';
-  $('#widgetTokens').textContent   = u ? (u.tokens || 0).toLocaleString() : '—';
+  const guestState = $('#widgetGuestState');
+  const userState = $('#widgetUserState');
 
-  // Buttons are only useful when signed in.
-  $('#widgetGetTokens').disabled = !u;
-  $('#widgetMakeOffer').disabled = !u;
+  if (u) {
+    if (guestState) guestState.classList.add('hidden');
+    if (userState) userState.classList.remove('hidden');
+
+    const rankEl = $('#widgetRank');
+    const levelEl = $('#widgetLevel');
+    const pointsEl = $('#widgetPoints');
+    const tokensEl = $('#widgetTokens');
+
+    if (rankEl) rankEl.textContent = formatRank(u.rank);
+    if (levelEl) levelEl.textContent = (u.level || 0).toLocaleString();
+    if (pointsEl) pointsEl.textContent = (u.points || 0).toLocaleString();
+    if (tokensEl) tokensEl.textContent = (u.tokens || 0).toLocaleString();
+
+    // Animate prestige circular gauge
+    const points = u.points || 0;
+    const progress = nextTierInfo(points);
+    let pct = 0;
+    if (progress.done) {
+      pct = 100;
+    } else {
+      const range = progress.target - progress.start;
+      const done = points - progress.start;
+      pct = Math.min(100, Math.max(0, Math.floor((done / range) * 100)));
+    }
+
+    const fillEl = $('#widgetDialFill');
+    const percentEl = $('#widgetProgressPercent');
+    if (percentEl) percentEl.textContent = `${pct}%`;
+    if (fillEl) {
+      const offset = 251.2 - (251.2 * pct) / 100;
+      fillEl.style.strokeDashoffset = offset;
+    }
+
+    const getTokensBtn = $('#widgetGetTokens');
+    const makeOfferBtn = $('#widgetMakeOffer');
+    if (getTokensBtn) getTokensBtn.disabled = false;
+    if (makeOfferBtn) makeOfferBtn.disabled = false;
+  } else {
+    if (guestState) guestState.classList.remove('hidden');
+    if (userState) userState.classList.add('hidden');
+  }
 }
 
 async function onBuyTokens(e) {

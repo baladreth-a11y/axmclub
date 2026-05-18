@@ -407,6 +407,57 @@ async function onEnd() {
   toast('Call ended.');
 }
 
+// --- HUD Overlays Interactivity & Floating Emotes -------------------------
+function triggerFloatingEmote(emote) {
+  const container = document.getElementById('hudReactions');
+  if (!container) return;
+  const el = document.createElement('span');
+  el.className = 'floating-emote';
+  el.textContent = emote;
+  el.style.left = `${10 + Math.random() * 80}%`;
+  el.style.fontSize = `${24 + Math.random() * 20}px`;
+  
+  const drift = (Math.random() - 0.5) * 60;
+  el.style.setProperty('--drift-x', `${drift}px`);
+  
+  container.appendChild(el);
+  setTimeout(() => el.remove(), 2500);
+}
+
+function initHudInteractions() {
+  const container = document.querySelector('.hud-quick-reactions');
+  if (container) {
+    container.addEventListener('click', e => {
+      const btn = e.target.closest('.emote-btn');
+      if (!btn) return;
+      const emote = btn.dataset.emote;
+      if (emote) {
+        triggerFloatingEmote(emote);
+        toast(`Sent ${emote} reaction to stream!`, 'success');
+      }
+    });
+  }
+
+  const muteBtn = document.getElementById('hudMuteBtn');
+  const slider = document.getElementById('hudVolumeSlider');
+  if (muteBtn && slider) {
+    let lastVal = 80;
+    muteBtn.addEventListener('click', () => {
+      if (slider.value > 0) {
+        lastVal = slider.value;
+        slider.value = 0;
+        muteBtn.textContent = '🔇';
+      } else {
+        slider.value = lastVal;
+        muteBtn.textContent = '🔊';
+      }
+    });
+    slider.addEventListener('input', () => {
+      muteBtn.textContent = slider.value == 0 ? '🔇' : '🔊';
+    });
+  }
+}
+
 // --- Wiring ---------------------------------------------------------------
 export function initCamroom() {
   if (!$('#camroom') && !$('#camLocked')) return;
@@ -445,6 +496,9 @@ export function initCamroom() {
       if (fab) fab.click();
     });
   }
+
+  // Initialize HUD control overlays
+  initHudInteractions();
 
   // Keep cam room in sync with user changes (login, redeem, cam2cam toggle).
   store.subscribe(state => {

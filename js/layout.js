@@ -41,9 +41,14 @@ function navMarkup(activePage) {
   const isActive = name => (activePage === name ? ' aria-current="page"' : '');
   return `
     <div class="container nav-inner">
-      <a href="/" class="brand" aria-label="AxMclub home">
+      <button id="navToggle" class="nav-toggle" aria-label="Toggle navigation menu">
+        <span class="nav-toggle-line"></span>
+        <span class="nav-toggle-line"></span>
+        <span class="nav-toggle-line"></span>
+      </button>
+      <a href="/" class="brand" aria-label="AxMcamPlayers home">
         <span class="brand-mark">A</span>
-        <span class="brand-name">AxMclub<span class="brand-accent">.com</span></span>
+        <span class="brand-name">AxM<span class="brand-accent">cam</span>Players</span>
       </a>
       <nav class="nav-links" aria-label="Primary">
         <a id="navPlayers" class="nav-link" href="/players.html"${isActive('players')}>Players</a>
@@ -55,11 +60,6 @@ function navMarkup(activePage) {
         <a id="navModelLink" class="nav-link hidden" href="/model.html"${isActive('model')}>Model dashboard</a>
       </nav>
       <div class="nav-actions">
-        <button id="navToggle" class="nav-toggle" aria-label="Toggle navigation menu" hidden>
-          <span class="nav-toggle-line"></span>
-          <span class="nav-toggle-line"></span>
-          <span class="nav-toggle-line"></span>
-        </button>
         <button id="openLogin" class="btn btn-ghost">Sign in</button>
         <button id="openRegister" class="btn btn-primary">Join free</button>
         <div id="userChip" class="user-chip hidden">

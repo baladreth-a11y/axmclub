@@ -40,8 +40,8 @@ function drawWheel(deg = 0) {
     ctx.closePath();
     ctx.fillStyle = color;
     ctx.fill();
-    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#d4af6a';
+    ctx.lineWidth = 2.5;
     ctx.stroke();
 
     ctx.save();
@@ -53,10 +53,36 @@ function drawWheel(deg = 0) {
     ctx.restore();
   }
 
+  // Draw premium multi-layered central gold crown hub
+  ctx.beginPath();
+  ctx.arc(0, 0, 42, 0, Math.PI * 2);
+  const grad = ctx.createRadialGradient(0, 0, 4, 0, 0, 42);
+  grad.addColorStop(0, '#fffbf2');
+  grad.addColorStop(0.3, '#f7e3ba');
+  grad.addColorStop(0.7, '#d4af6a');
+  grad.addColorStop(1, '#8c6b2b');
+  ctx.fillStyle = grad;
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.arc(0, 0, 28, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.18)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.arc(0, 0, 14, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
   ctx.beginPath();
   ctx.arc(0, 0, r, 0, Math.PI * 2);
   ctx.strokeStyle = '#d4af6a';
-  ctx.lineWidth = 3;
+  ctx.lineWidth = 4;
   ctx.stroke();
   ctx.restore();
 }
@@ -91,12 +117,58 @@ function animateTo(idx) {
 
     const start = rotation;
     const t0 = performance.now();
+    const sparks = [];
+
+    function addSpark() {
+      if (sparks.length > 50) return;
+      sparks.push({
+        x: 0,
+        y: -190, // Pointer tip coordinates
+        vx: (Math.random() - 0.5) * 5,
+        vy: (Math.random() - 0.2) * -5 - 1.5,
+        size: Math.random() * 3 + 2,
+        alpha: 1,
+        life: 1
+      });
+    }
 
     function frame(now) {
       const t = Math.min(1, (now - t0) / SPIN_DURATION_MS);
       const eased = easeOutCubic(t);
       rotation = start + (finalDeg - start) * eased;
       drawWheel(rotation);
+
+      // Trigger spark loops on deceleration
+      if (t > 0.55) {
+        if (Math.random() < 0.35) addSpark();
+
+        ctx.save();
+        const size = canvas.width;
+        const cx = size / 2, cy = size / 2;
+        ctx.translate(cx, cy);
+
+        for (let i = sparks.length - 1; i >= 0; i--) {
+          const s = sparks[i];
+          s.x += s.vx;
+          s.y += s.vy;
+          s.alpha -= 0.025;
+          s.size *= 0.95;
+
+          if (s.alpha <= 0 || s.size < 0.5) {
+            sparks.splice(i, 1);
+            continue;
+          }
+
+          ctx.beginPath();
+          ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(212, 175, 106, ${s.alpha})`;
+          ctx.shadowColor = '#d4af6a';
+          ctx.shadowBlur = 6;
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+
       if (t < 1) requestAnimationFrame(frame);
       else resolve();
     }

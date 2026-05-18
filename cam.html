@@ -58,16 +58,50 @@
             </div>
 
             <div id="camLive" class="cam-state hidden">
-              <div class="cam-stage cam-stage-live" aria-hidden="true">
+              <div class="cam-stage cam-stage-live" aria-hidden="true" style="position: relative;">
                 <div class="cam-live-indicator"><span class="pulse"></span>LIVE</div>
-                <div class="cam-stage-overlay">
-                  <p class="cam-stage-title">Stream placeholder</p>
-                  <p class="cam-stage-sub">Your pass is active. Hook this up to your WebRTC/HLS provider.</p>
+                
+                <!-- Transparent Stream HUD Overlay -->
+                <div class="cam-hud-overlay">
+                  <div class="cam-hud-top">
+                    <span class="cam-hud-quality">🔴 PREMIUM 1080P HD</span>
+                    <span class="cam-hud-viewers"><span class="heartbeat-dot"></span> 1,248 viewing</span>
+                  </div>
+                  
+                  <div class="cam-hud-reactions" id="hudReactions"></div>
+                  
+                  <div class="cam-hud-controls">
+                    <div class="cam-hud-controls-left">
+                      <button type="button" class="hud-control-btn" id="hudMuteBtn" title="Toggle audio">🔊</button>
+                      <input type="range" class="hud-volume-slider" id="hudVolumeSlider" min="0" max="100" value="80" title="Volume" />
+                    </div>
+                    <div class="cam-hud-controls-right">
+                      <select class="hud-resolution-select" id="hudResolution" title="Resolution">
+                        <option value="1080p">1080p HD</option>
+                        <option value="720p">720p SD</option>
+                        <option value="auto">Auto</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="cam-stage-overlay" id="camStageOverlayDefault">
+                  <p class="cam-stage-title">Stream Active</p>
+                  <p class="cam-stage-sub">Watch high-fidelity interactive chat feeds. Enjoy your premium time-limited session.</p>
                 </div>
               </div>
-              <div class="cam-live-footer">
-                <span class="cam-countdown-label">Time left</span>
-                <span id="camCountdown" class="cam-countdown">10:00</span>
+              <div class="cam-live-footer" style="display: flex; justify-content: space-between; align-items: center; gap: var(--space-4); padding: var(--space-4) var(--space-5);">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span class="cam-countdown-label">Time left:</span>
+                  <span id="camCountdown" class="cam-countdown">10:00</span>
+                </div>
+                <div class="hud-quick-reactions">
+                  <span style="font-size: 11px; color: var(--muted); font-weight: 700; text-transform: uppercase;">Quick Tip:</span>
+                  <button type="button" class="emote-btn" data-emote="🔥">🔥</button>
+                  <button type="button" class="emote-btn" data-emote="💖">💖</button>
+                  <button type="button" class="emote-btn" data-emote="👑">👑</button>
+                  <button type="button" class="emote-btn" data-emote="💎">💎</button>
+                </div>
               </div>
             </div>
 

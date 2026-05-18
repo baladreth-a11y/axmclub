@@ -56,6 +56,44 @@ if (document.readyState === 'loading') {
   }, 5000);
 }
 
+function initLiveActivityFeed() {
+  const feed = $('#liveActivityFeed');
+  if (!feed) return;
+
+  const mockUsers = [
+    'User#4829', 'Supporter#224', 'Guest#9012', 'VipPlayer', 'GoldenGamer', 
+    'KingTrapper', 'Model Nova', 'Model Luna', 'Model Stella'
+  ];
+  const activities = [
+    { text: 'won <strong>100 pts</strong> on Roulette! 🎡' },
+    { text: 'won <strong>500 pts</strong> on Roulette! 🎡' },
+    { text: 'received a <strong>25 token</strong> tip! 💎' },
+    { text: 'received a <strong>100 token</strong> tip! 💎' },
+    { text: 'reached <strong>Level 5</strong>! 🌟' },
+    { text: 'reached <strong>Level 10</strong>! 🌟' },
+    { text: 'claimed their <strong>Daily Reward</strong>! 🎁' },
+    { text: 'unlocked <strong>Gold Tier</strong> status! 👑' }
+  ];
+
+  setInterval(() => {
+    const user = mockUsers[Math.floor(Math.random() * mockUsers.length)];
+    const act = activities[Math.floor(Math.random() * activities.length)];
+    const entry = document.createElement('div');
+    entry.className = 'feed-entry';
+    entry.innerHTML = `
+      <span class="feed-time">Just now</span>
+      <span class="feed-user">${user}</span>
+      <span>${act.text}</span>
+    `;
+    feed.insertBefore(entry, feed.firstChild);
+    
+    // Maintain a max of 5 feed items
+    while (feed.children.length > 5) {
+      feed.removeChild(feed.lastChild);
+    }
+  }, 4000);
+}
+
 async function bootstrap() {
   initSharedLayout();
   initWheel();
@@ -64,6 +102,7 @@ async function bootstrap() {
   initTasks();
   initCamroom();
   initUserWidget();
+  initLiveActivityFeed();
 
   // Initial data load. Don't block UI on failures.
   const [meRes, statsRes] = await Promise.allSettled([api.me(), api.stats()]);

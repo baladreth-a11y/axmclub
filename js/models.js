@@ -30,15 +30,23 @@ function brandStyle(color) {
   return `style="--model-brand: ${escapeHtml(color)};"`;
 }
 
-function socialLinks(s) {
-  if (!s) return '';
-  const items = [];
-  if (s.telegram) items.push(`<a href="${escapeHtml(s.telegram)}" rel="noopener" data-kind="telegram">Telegram</a>`);
-  if (s.snap)     items.push(`<a href="${escapeHtml(s.snap)}"     rel="noopener" data-kind="snap">Snap</a>`);
-  if (s.webcam)   items.push(`<a href="${escapeHtml(s.webcam)}"   rel="noopener" data-kind="webcam">Webcam</a>`);
-  if (s.fansite)  items.push(`<a href="${escapeHtml(s.fansite)}"  rel="noopener" data-kind="fansite">Fansite</a>`);
-  if (!items.length) return '';
-  return `<div class="model-socials">${items.join('')}</div>`;
+function socialSlots(s) {
+  s = s || {};
+  const platforms = [
+    { key: 'telegram', label: 'TG', icon: '✈️' },
+    { key: 'snap', label: 'Snap', icon: '👻' },
+    { key: 'webcam', label: 'Cam', icon: '🎥' },
+    { key: 'fansite', label: 'VIP', icon: '💎' }
+  ];
+  const items = platforms.map(p => {
+    const url = s[p.key];
+    if (url) {
+      return `<a href="${escapeHtml(url)}" target="_blank" rel="noopener" class="social-slot is-active" data-kind="${p.key}" title="${p.label}">${p.icon} <span class="slot-label">${p.label}</span></a>`;
+    } else {
+      return `<span class="social-slot is-empty" title="Not available">${p.icon} <span class="slot-label">${p.label}</span></span>`;
+    }
+  });
+  return `<div class="social-slots-grid">${items.join('')}</div>`;
 }
 
 function modelCard(m) {
@@ -64,7 +72,7 @@ function modelCard(m) {
         </header>
         ${bio}
       </a>
-      ${socialLinks(m.socials)}
+      ${socialSlots(m.socials)}
     </article>`;
 }
 
@@ -89,8 +97,12 @@ export async function loadModels() {
       for (const grid of grids) renderEmpty(grid);
       return;
     }
-    const html = list.map(modelCard).join('');
-    for (const grid of grids) grid.innerHTML = html;
+    for (const grid of grids) {
+      const limitAttr = grid.getAttribute('data-limit');
+      const limit = limitAttr ? parseInt(limitAttr, 10) : Infinity;
+      const slicedList = isFinite(limit) ? list.slice(0, limit) : list;
+      grid.innerHTML = slicedList.map(modelCard).join('');
+    }
   } catch (err) {
     for (const grid of grids) {
       grid.innerHTML = `<p class="lb-empty">Could not load models: ${escapeHtml(err.message)}</p>`;
