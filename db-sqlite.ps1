@@ -180,13 +180,9 @@ function Invoke-SqlQuery($query, $parameters = @{}) {
     }
 }
 
-function Get-User($email) {
-    if (-not $email) { return $null }
-    $emailLc = $email.ToLowerInvariant()
-    $rows = Invoke-SqlQuery -query "SELECT * FROM users WHERE email = @email" -parameters @{"@email" = $emailLc}
-    if (-not $rows) { return $null }
-    $r = $rows[0]
-    
+function Map-User($r) {
+    if (-not $r) { return $null }
+    $emailLc = ($r.email).ToLowerInvariant()
     $u = @{
         email         = $emailLc
         name          = if ($r.name -is [System.DBNull]) { $null } else { $r.name }
@@ -219,6 +215,14 @@ function Get-User($email) {
         dmPolicy      = if ($r.dmPolicy -is [System.DBNull]) { 'open' } else { $r.dmPolicy }
     }
     return $u
+}
+
+function Get-User($email) {
+    if (-not $email) { return $null }
+    $emailLc = $email.ToLowerInvariant()
+    $rows = Invoke-SqlQuery -query "SELECT * FROM users WHERE email = @email" -parameters @{"@email" = $emailLc}
+    if (-not $rows) { return $null }
+    return Map-User $rows[0]
 }
 
 function Save-User($u) {
@@ -258,10 +262,10 @@ function Save-User($u) {
 }
 
 function Get-AllUsers {
-    $rows = Invoke-SqlQuery -query "SELECT email FROM users"
+    $rows = Invoke-SqlQuery -query "SELECT * FROM users"
     $list = @()
     foreach ($r in $rows) {
-        $list += Get-User $r.email
+        $list += Map-User $r
     }
     return $list
 }
@@ -328,18 +332,22 @@ function Save-Feedback($f) {
     Invoke-SqlQuery -query $q -parameters @{"@id"=$f.id; "@from"=$f.from; "@text"=$f.text; "@status"=$f.status; "@at"=[long]$f.at} | Out-Null
 }
 
+function Map-Thread($r) {
+    if (-not $r) { return $null }
+    return @{
+        id       = $r.id
+        a        = $r.email_a
+        b        = $r.email_b
+        lastMs   = [long]$r.lastMs
+        lastRead = if ($r.lastRead -and $r.lastRead -isnot [System.DBNull]) { $r.lastRead | ConvertFrom-Json | ConvertTo-Hashtable } else { @{} }
+        messages = if ($r.messages -and $r.messages -isnot [System.DBNull]) { $r.messages | ConvertFrom-Json | ConvertTo-Hashtable } else { @() }
+    }
+}
+
 function Get-Thread($id) {
     $rows = Invoke-SqlQuery -query "SELECT * FROM threads WHERE id = @id" -parameters @{"@id"=$id}
     if (-not $rows) { return $null }
-    $r = $rows[0]
-    return @{
-        id = $r.id
-        a = $r.email_a
-        b = $r.email_b
-        lastMs = [long]$r.lastMs
-        lastRead = if ($r.lastRead) { ConvertFrom-Json $r.lastRead -AsHashtable } else { @{} }
-        messages = if ($r.messages) { ConvertFrom-Json $r.messages } else { @() }
-    }
+    return Map-Thread $rows[0]
 }
 
 function Save-Thread($t) {
@@ -350,9 +358,9 @@ function Save-Thread($t) {
 }
 
 function Get-AllThreads() {
-    $rows = Invoke-SqlQuery -query "SELECT id FROM threads"
+    $rows = Invoke-SqlQuery -query "SELECT * FROM threads"
     $list = @()
-    foreach ($r in $rows) { $list += Get-Thread $r.id }
+    foreach ($r in $rows) { $list += Map-Thread $r }
     return $list
 }
 
@@ -387,9 +395,9 @@ function Load-DatabaseToMemory {
     $Script:LastSavedJson.stats = Get-ObjectJson $db.stats
     
     # Users
-    $rows = Invoke-SqlQuery -query "SELECT email FROM users"
+    $rows = Invoke-SqlQuery -query "SELECT * FROM users"
     foreach ($r in $rows) {
-        $u = Get-User $r.email
+        $u = Map-User $r
         if ($u) {
             $email = $u.email.ToLowerInvariant()
             $db.users[$email] = $u
@@ -419,17 +427,12 @@ function Load-DatabaseToMemory {
     # Threads (Hashtable indexed by email_a:email_b)
     $rows = Invoke-SqlQuery -query "SELECT * FROM threads"
     foreach ($r in $rows) {
-        $key = $r.id
-        $thread = @{
-            id       = $r.id
-            a        = $r.email_a
-            b        = $r.email_b
-            lastMs   = [long]$r.lastMs
-            lastRead = if ($r.lastRead -is [System.DBNull]) { @{} } else { $r.lastRead | ConvertFrom-Json | ConvertTo-Hashtable }
-            messages = if ($r.messages -is [System.DBNull]) { @() } else { $r.messages | ConvertFrom-Json | ConvertTo-Hashtable }
+        $thread = Map-Thread $r
+        if ($thread) {
+            $key = $thread.id
+            $db.threads[$key] = $thread
+            $Script:LastSavedJson.threads[$key] = Get-ObjectJson $thread
         }
-        $db.threads[$key] = $thread
-        $Script:LastSavedJson.threads[$key] = Get-ObjectJson $thread
     }
 
     # Config

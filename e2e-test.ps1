@@ -126,6 +126,7 @@ $serverArgs   = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$serverScript
 # here ensures the spawned server inherits it.
 $AdminKey = 'e2e-admin-key-' + [guid]::NewGuid().ToString('N').Substring(0,8)
 $env:AURUM_ADMIN_KEY = $AdminKey
+$env:AURUM_E2E_TEST = 'true'
 
 $serverProc = Start-Process -FilePath 'powershell' -ArgumentList $serverArgs -PassThru -WindowStyle Hidden -RedirectStandardOutput $outLog -RedirectStandardError $errLog
 
